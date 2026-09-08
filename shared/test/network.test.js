@@ -1,0 +1,12 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { move, reconcile, interpolate } from '../game.js';
+const input = sequence => ({sequence,up:false,down:false,left:false,right:true});
+const player = (x,lastSequence=0) => ({playerProfileId:'p',x,y:100,lastSequence});
+const frame = (serverTime,x) => ({serverTime,players:[player(x)]});
+test('prediction replays every unacknowledged fixed step after a delayed snapshot',()=>{const result=reconcile(player(100,1),[input(1),input(2),input(3)],20);assert.equal(result.position.x,126);assert.deepEqual(result.pending.map(p=>p.sequence),[2,3]);});
+test('authoritative correction replaces drift and replays only unacknowledged inputs',()=>{const result=reconcile(player(80,2),[input(1),input(2),input(3)],20);assert.equal(result.position.x,93);assert.equal(reconcile(player(93,3),result.pending,20).pending.length,0);});
+test('prediction respects world boundaries and normalized diagonals',()=>{assert.equal(move({x:1580,y:100},input(1),1).x,1582);const p=move({x:100,y:100},{...input(1),down:true},1);assert.ok(Math.abs(Math.hypot(p.x-100,p.y-100)-260)<1e-9);});
+test('remote interpolation uses the two surrounding snapshots',()=>{assert.deepEqual(interpolate([frame(0,100),frame(100,126),frame(200,152)],'p',150),{x:139,y:100});});
+test('delayed or missing snapshots clamp without indefinite extrapolation',()=>{const frames=[frame(0,100),frame(100,126)];assert.deepEqual(interpolate(frames,'p',10000),{x:126,y:100});assert.deepEqual(interpolate(frames,'p',-100),{x:100,y:100});assert.equal(interpolate([],'p',0),null);});
+test('removed remote players disappear even while the interpolation clock is behind',()=>{assert.equal(interpolate([frame(0,100),{serverTime:100,players:[]}],'p',50),null);});

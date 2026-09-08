@@ -1,5 +1,6 @@
 import Phaser from "phaser";
-import { BootScene } from "./scenes/boot-scene";
-export function createGame(parent: HTMLDivElement) {
- return new Phaser.Game({ type: Phaser.AUTO, parent, backgroundColor: "#101916", scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH, width: 960, height: 480 }, scene: [BootScene], banner: false, audio: { noAudio: true } });
+import { ArenaScene } from "./scenes/arena-scene";
+import type { ArenaNetwork } from "./network";
+export function createGame(parent: HTMLDivElement, network: ArenaNetwork) {
+ return new Phaser.Game({ type: Phaser.AUTO, parent, backgroundColor: "#101916", scale: { mode: Phaser.Scale.RESIZE, width: parent.clientWidth, height: parent.clientHeight }, scene: [new ArenaScene(network)], banner: false, audio: { noAudio: true } });
 }

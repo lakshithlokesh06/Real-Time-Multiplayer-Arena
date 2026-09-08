@@ -2,6 +2,8 @@ import "dotenv/config";
 export function parseEnv(source: NodeJS.ProcessEnv) {
  const environment = source.NODE_ENV ?? "development";
  if (!["development", "test", "production"].includes(environment)) throw new Error("NODE_ENV must be development, test, or production");
+ const gameTickRate = Number(source.GAME_TICK_RATE ?? 20);
+ if (!Number.isInteger(gameTickRate) || gameTickRate < 10 || gameTickRate > 60) throw new Error("GAME_TICK_RATE must be 10–60");
  const port = Number(source.PORT ?? 4000);
  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PORT must be an integer between 1 and 65535");
  const frontendUrl = source.FRONTEND_URL ?? (environment === "production" ? "" : "http://localhost:3000");
@@ -24,7 +26,7 @@ export function parseEnv(source: NodeJS.ProcessEnv) {
  if (!/^[A-Za-z0-9_-]{1,64}$/.test(sessionCookieName) || (sessionCookieName.startsWith("__Host-") && !cookieSecure)) throw new Error("Invalid session cookie name");
  const trustProxyHops = Number(source.TRUST_PROXY_HOPS ?? 0);
  if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0 || trustProxyHops > 5) throw new Error("TRUST_PROXY_HOPS must be 0–5");
- return { environment, port, frontendUrl, redisUrl, databaseUrl, sessionTtl, sessionCookieName, cookieSecure, cookieSameSite, trustProxyHops };
+ return { gameTickRate, environment, port, frontendUrl, redisUrl, databaseUrl, sessionTtl, sessionCookieName, cookieSecure, cookieSameSite, trustProxyHops };
 }
 export type Environment = ReturnType<typeof parseEnv>;
 export const env = parseEnv(process.env);

@@ -4,10 +4,13 @@ import type { Ack, ClientToServerEvents, ServerToClientEvents } from "@arena/sha
 import type { SocketData } from "../types/socket.js";
 import type { AuthService } from "../services/auth.js";
 import { RoomError, roomInput, roomSchemas, publicRooms, safeRoom, type RoomService } from "../services/rooms.js";
+import { GameManager } from "../game/manager.js";
 import { logger } from "../utils/logger.js";
 type LobbySocket = Socket<ClientToServerEvents,ServerToClientEvents,Record<string,never>,SocketData>;
 type LobbyServer = Server<ClientToServerEvents,ServerToClientEvents,Record<string,never>,SocketData>;
-export function configureLobby(io: LobbyServer, auth: AuthService, rooms?: RoomService, graceMs = 5000) {
+export function configureLobby(io: LobbyServer, auth: AuthService, rooms?: RoomService, graceMs = 5000, tickRate = 20) {
+ const games = new GameManager(tickRate, snapshot => io.to(`lobby:room:${snapshot.roomId}`).emit("game:state", snapshot));
+ games.start();
  let closing = false;
  const controllers = new Map<string,LobbySocket>();
  const departures = new Map<string,ReturnType<typeof setTimeout>>();
@@ -21,13 +24,15 @@ export function configureLobby(io: LobbyServer, auth: AuthService, rooms?: RoomS
    if (roomId) await socket.join(`lobby:room:${roomId}`);
    else socket.emit("room:state",null);
   }
+  games.reconcileRooms(state);
   for (const room of Object.values(state.rooms)) io.to(`lobby:room:${room.id}`).emit("room:state",safeRoom(room));
   io.emit("rooms:list",publicRooms(state));
-  if (readyRoomId) io.to(`lobby:room:${readyRoomId}`).emit("room:ready-to-start",{ roomId: readyRoomId, message: "Readiness confirmed. Gameplay arrives in Phase 4. Returning to waiting…" });
+  if (readyRoomId) io.to(`lobby:room:${readyRoomId}`).emit("room:ready-to-start",{ roomId: readyRoomId, message: "Launching arena…" });
  });
  io.on("connection",socket => {
   const id = socket.data.playerProfileId;
   const previous = controllers.get(id);
+  games.freeze(id);
   controllers.set(id,socket);
   clearTimeout(departures.get(id)); departures.delete(id);
   if (previous && previous !== socket) { previous.emit("lobby:replaced"); previous.disconnect(true); }
@@ -59,6 +64,21 @@ export function configureLobby(io: LobbyServer, auth: AuthService, rooms?: RoomS
     })();
    };
   }
+  let inputWindow = performance.now(), inputCount = 0, lastError = -Infinity;
+  socket.on("game:input", payload => {
+   if (!active()) return;
+   const now = performance.now();
+   if (now - inputWindow >= 1000) { inputWindow = now; inputCount = 0; }
+   try {
+    if (++inputCount > tickRate * 2 + 10) throw new RoomError("RATE_LIMITED", "Movement input rate exceeded.");
+    if (Date.now() >= socket.data.sessionExpiresAt) { socket.disconnect(true); return; }
+    games.input(id, payload);
+   } catch (error) {
+    if (now - lastError >= 1000) { const safe = error instanceof RoomError ? error : new RoomError("INVALID_INPUT", "Invalid movement input."); socket.emit("game:error", { code: safe.code, message: safe.message }); lastError = now; }
+   }
+  });
+  socket.on("game:sync",command(roomSchemas.empty, async service => { await service.sync(id,active); return games.sync(id); }));
+  socket.on("game:leave",command(roomSchemas.empty,service => service.leave(id,active)));
   socket.on("rooms:list",command(roomSchemas.empty,service => service.list(active)));
   socket.on("room:sync",command(roomSchemas.empty,service => service.sync(id,active)));
   socket.on("room:create",command(roomSchemas.create,(service,input) => service.create(socket.data,input,active),true));
@@ -69,10 +89,12 @@ export function configureLobby(io: LobbyServer, auth: AuthService, rooms?: RoomS
   socket.on("room:start",command(roomSchemas.empty,service => service.start(id,active)));
   socket.on("disconnect",reason => {
    if (controllers.get(id) !== socket) return;
+   games.freeze(id);
    if (reason === "server shutting down") { controllers.delete(id); return; }
    const stillDeparted = () => controllers.get(id) === socket && !socket.connected;
    const leave = () => {
     departures.delete(id);
+    games.remove(id);
     void rooms?.leave(id,stillDeparted).catch(() => { if (!closing) logger.warn("lobby.disconnect_cleanup_failed"); }).finally(() => { if (stillDeparted()) controllers.delete(id); });
     if (!rooms) controllers.delete(id);
    };
@@ -84,7 +106,7 @@ export function configureLobby(io: LobbyServer, auth: AuthService, rooms?: RoomS
   });
  });
  return async () => {
-  closing = true;
+  closing = true; games.close();
   clearInterval(limiterCleanup); for (const timer of departures.values()) clearTimeout(timer); departures.clear(); controllers.clear();
   await rooms?.close();
  };

@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { createGame } from "./create-game";
-export default function GameCanvas() {
+import type { ArenaNetwork } from "./network";
+export default function GameCanvas({ network }: { network: ArenaNetwork }) {
  const container = useRef<HTMLDivElement>(null);
  const [failed, setFailed] = useState(false);
  useEffect(() => {
@@ -9,9 +10,9 @@ export default function GameCanvas() {
   let game: ReturnType<typeof createGame> | undefined;
   let disposed = false;
   void import("./create-game").then(({ createGame }) => {
-   if (!disposed && container.current) game = createGame(container.current);
+   if (!disposed && container.current) game = createGame(container.current, network);
   }).catch(() => { if (!disposed) setFailed(true); });
   return () => { disposed = true; game?.destroy(true); };
- }, []);
- return <section className="game-shell" aria-label="Arena engine preview">{failed ? <p role="alert">The game engine could not initialize. Try a browser with WebGL or Canvas support.</p> : <><div ref={container} /><p className="game-caption">Engine preview only · No playable mechanics</p></>}</section>;
+ }, [network]);
+ return <section className="arena-canvas" aria-label="Multiplayer arena" tabIndex={0}>{failed ? <p role="alert">The game engine could not initialize. Try a browser with WebGL or Canvas support.</p> : <div ref={container} />}</section>;
 }

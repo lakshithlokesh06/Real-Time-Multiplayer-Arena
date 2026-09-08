@@ -26,7 +26,7 @@ export function roomInput<T>(schema: z.ZodType<T>, input: unknown): T {
  return result.data;
 }
 export function safeRoom(room: StoredRoom): RoomState {
- return { id: room.id, code: room.code, name: room.name, visibility: room.visibility, status: room.status, hostPlayerProfileId: room.hostPlayerProfileId, maxPlayers: room.maxPlayers, createdAt: room.createdAt, players: room.players.map(p => ({ playerProfileId: p.playerProfileId, username: p.username, displayName: p.displayName, ready: p.ready, connected: p.connected, isHost: p.isHost, joinedAt: p.joinedAt })) };
+ return { ...(room.gameId ? { gameId: room.gameId } : {}), id: room.id, code: room.code, name: room.name, visibility: room.visibility, status: room.status, hostPlayerProfileId: room.hostPlayerProfileId, maxPlayers: room.maxPlayers, createdAt: room.createdAt, players: room.players.map(p => ({ playerProfileId: p.playerProfileId, username: p.username, displayName: p.displayName, ready: p.ready, connected: p.connected, isHost: p.isHost, joinedAt: p.joinedAt })) };
 }
 export function publicRooms(snapshot: LobbySnapshot): PublicRoom[] {
  return Object.values(snapshot.rooms).filter(room => room.visibility === "PUBLIC" && room.status === "WAITING" && room.players.length < room.maxPlayers).map(room => ({ id: room.id, name: room.name, hostDisplayName: room.players.find(p => p.isHost)?.displayName ?? "Player", playerCount: room.players.length, maxPlayers: room.maxPlayers, status: room.status }));
@@ -53,7 +53,7 @@ export function createRoomService(redis: () => RedisClient | undefined, options:
    try { const raw = await client.get(key); state = raw ? JSON.parse(raw) as LobbySnapshot : empty(); }
    catch { throw new RoomError("UNAVAILABLE", "The lobby is temporarily unavailable. Please try again."); }
    if (!guard()) throw new RoomError("UNAUTHENTICATED", "This lobby connection is no longer active.");
-   for (const room of Object.values(state.rooms)) if (room.status === "STARTING" && (room.launchEndsAt ?? 0) <= Date.now()) reset(room);
+   for (const room of Object.values(state.rooms)) if (room.status === "STARTING" && (room.launchEndsAt ?? 0) <= Date.now()) { room.status = "IN_GAME"; room.gameId = randomUUID(); delete room.launchEndsAt; }
    const { result, readyRoomId } = action(state);
    // One atomic SET commits metadata, membership, codes, and readiness together.
    try { await client.set(key, JSON.stringify(state), { EX: ttl }); }
@@ -65,7 +65,7 @@ export function createRoomService(redis: () => RedisClient | undefined, options:
  function reset(room: StoredRoom) { room.status = "WAITING"; delete room.launchEndsAt; for (const player of room.players) player.ready = false; }
  function current(state: LobbySnapshot, playerId: string) { const id = state.playerRooms[playerId]; return id ? state.rooms[id] : undefined; }
  function requireRoom(state: LobbySnapshot, id: string) { const room = current(state,id); if (!room) throw new RoomError("NOT_MEMBER", "Join a room first."); return room; }
- function waiting(room: StoredRoom) { if (room.status !== "WAITING") throw new RoomError("NOT_WAITING", "Wait for the readiness check to finish."); }
+ function waiting(room: StoredRoom) { if (room.status !== "WAITING") throw new RoomError("NOT_WAITING", "This room has already started."); }
  function join(state: LobbySnapshot, identity: RoomIdentity, room?: StoredRoom) {
   if (!room) throw new RoomError("NOT_FOUND", "No joinable room was found.");
   const existing = current(state,identity.playerProfileId);
@@ -137,7 +137,7 @@ export function createRoomService(redis: () => RedisClient | undefined, options:
     room.status = "STARTING"; room.launchEndsAt = Date.now() + startDelay;
     return { result: safeRoom(room), readyRoomId: room.id };
    },guard);
-   const timer = setTimeout(() => { timers.delete(timer); void execute(() => ({ result: null })).catch(() => logger.warn("lobby.start_reset_failed")); }, startDelay + 10).unref();
+   const timer = setTimeout(() => { timers.delete(timer); void execute(() => ({ result: null })).catch(() => logger.warn("lobby.start_transition_failed")); }, startDelay + 10).unref();
    timers.add(timer); return result;
   },
   async close() {

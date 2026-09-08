@@ -2,5 +2,18 @@
   "name": "@arena/shared",
   "version": "0.1.0",
   "private": true,
-  "types": "index.d.ts"
+  "types": "index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts"
+    },
+    "./game": {
+      "types": "./game.d.ts",
+      "default": "./game.js"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
 }

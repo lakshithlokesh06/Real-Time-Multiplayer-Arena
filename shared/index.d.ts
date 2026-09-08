@@ -5,7 +5,7 @@ export interface RoomPlayer {
  ready: boolean; connected: boolean; isHost: boolean; joinedAt: string;
 }
 export interface RoomState {
- id: string; code: string; name: string; visibility: Visibility; status: RoomStatus;
+ gameId?: string; id: string; code: string; name: string; visibility: Visibility; status: RoomStatus;
  hostPlayerProfileId: string; maxPlayers: number; createdAt: string; players: RoomPlayer[];
 }
 export interface PublicRoom {
@@ -16,6 +16,9 @@ export type RoomErrorCode = "INVALID_INPUT" | "NOT_FOUND" | "ROOM_FULL" | "ALREA
 export type Result<T> = { ok: true; data: T } | { ok: false; error: { code: RoomErrorCode; message: string } };
 export type Ack<T> = (result: Result<T>) => void;
 export interface ClientToServerEvents {
+ "game:sync": (payload: Record<string, never>, ack: Ack<GameSnapshot | null>) => void;
+ "game:leave": (payload: Record<string, never>, ack: Ack<null>) => void;
+ "game:input": (payload: GameInput) => void;
  "system:ping": () => void;
  "rooms:list": (payload: Record<string, never>, ack: Ack<PublicRoom[]>) => void;
  "room:sync": (payload: Record<string, never>, ack: Ack<RoomState | null>) => void;
@@ -27,9 +30,15 @@ export interface ClientToServerEvents {
  "room:start": (payload: Record<string, never>, ack: Ack<RoomState>) => void;
 }
 export interface ServerToClientEvents {
+ "game:state": (snapshot: GameSnapshot) => void;
+ "game:error": (error: { code: RoomErrorCode; message: string }) => void;
  "system:pong": (payload: { socketId: string; timestamp: string }) => void;
  "room:state": (room: RoomState | null) => void;
  "rooms:list": (rooms: PublicRoom[]) => void;
  "room:ready-to-start": (payload: { roomId: string; message: string }) => void;
  "lobby:replaced": () => void;
 }
+
+export interface GameInput { gameId: string; sequence: number; up: boolean; down: boolean; left: boolean; right: boolean }
+export interface GamePlayer { playerProfileId: string; username: string; displayName: string; x: number; y: number; lastSequence: number; connected: boolean }
+export interface GameSnapshot { gameId: string; roomId: string; tick: number; serverTime: number; tickRate: number; snapshotRate: number; players: GamePlayer[] }

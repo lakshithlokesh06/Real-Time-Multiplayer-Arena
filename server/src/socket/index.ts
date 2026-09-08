@@ -18,7 +18,7 @@ export function attachSocketServer(httpServer: HttpServer, config: Environment, 
    const identity = await auth.resolve(readSessionCookie(socket.request.headers.cookie, config));
    if (!identity) { next(new Error("Authentication required.")); return; }
    const { player, sessionId } = identity;
-   socket.data = { sessionId, userId: player.id, playerProfileId: player.profile.id, username: player.profile.username, displayName: player.profile.displayName };
+   socket.data = { sessionExpiresAt: identity.expiresAt.getTime(), sessionId, userId: player.id, playerProfileId: player.profile.id, username: player.profile.username, displayName: player.profile.displayName };
    next();
   } catch { next(new Error("Authentication unavailable.")); }
  });
@@ -43,7 +43,7 @@ export function attachSocketServer(httpServer: HttpServer, config: Environment, 
   });
   socket.on("disconnect", reason => { clearInterval(interval); logger.info("socket.disconnected", { socketId: socket.id, reason }); });
  });
- const closeLobby = configureLobby(io, auth, rooms, graceMs);
+ const closeLobby = configureLobby(io, auth, rooms, graceMs, config.gameTickRate);
  httpServer.once("close", () => { void closeLobby().catch(() => logger.warn("lobby.shutdown_cleanup_failed")); });
  return io;
 }

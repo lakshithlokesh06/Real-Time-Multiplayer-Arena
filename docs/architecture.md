@@ -1,6 +1,6 @@
 # Architecture
 
-Phase 2 extends the Phase 1 npm workspace monorepo. React/Next.js handles account UI; Express handles REST; Socket.IO shares the Node HTTP server; Prisma/PostgreSQL owns player identity and sessions. Redis stays optional. No gameplay, room, matchmaking, leaderboard, or match system has been implemented.
+Phase 3 extends the existing npm workspace monorepo. React/Next.js handles account UI; Express handles REST; Socket.IO shares the Node HTTP server; Prisma/PostgreSQL owns player identity and sessions. Redis owns ephemeral rooms; it remains optional for authentication. No arena gameplay, matchmaking, leaderboard, or match system has been implemented.
 
 ## Frontend boundaries
 
@@ -8,7 +8,7 @@ Next.js App Router serves public `/`, `/login`, `/register`, and the future `/le
 
 `AuthProvider` restores a session, exposes loading/authenticated/unauthenticated/error states, and updates identity after registration, login, profile updates, or logout. Request generations prevent a slow initial `/me` response from overwriting a newer login/logout. Focus refresh and a BroadcastChannel notification synchronize tabs without putting credentials or account data in browser storage. A failed session check displays a retry state rather than pretending the user logged out.
 
-`services/api.ts` centralizes fetch, credentials, safe errors, JSON, and the CSRF header. `services/auth.ts` owns account endpoints. `services/socket.ts` sets `withCredentials: true`; it supplies no client identity as proof of authentication. `/play` verifies a diagnostic socket connection and renders the existing Phaser preview. Phaser remains dynamically imported with SSR disabled, creates one game per mount, and destroys it on unmount. React owns the surrounding UI; Phaser owns its canvas and scenes.
+`services/api.ts` centralizes fetch, credentials, safe errors, JSON, and the CSRF header. `services/auth.ts` owns account endpoints. `services/socket.ts` sets `withCredentials: true`; it supplies no client identity as proof of authentication. `/play` now uses one `useLobby` hook owning one credentialed typed socket. It renders room discovery or the authoritative current-room view, clears stale UI on disconnect, synchronizes state after connect, and cleans up all listeners. A second tab replaces the previous controller. The Phaser foundation is retained for Phase 4, but no Phaser module is loaded by this page in Phase 3.
 
 ## PostgreSQL model
 
@@ -50,11 +50,11 @@ JSON bodies are capped at 16 KiB. Register/login share an IP limiter of 20 attem
 
 Handshake Origin must exactly match FRONTEND_URL. Middleware validates the same cookie/session as REST and rejects unauthenticated connections. Safe typed socket data contains userId, playerProfileId, username, displayName, plus an internal sessionId for revocation. Client-supplied IDs are ignored.
 
-The existing `system:ping` → `system:pong` diagnostic remains available only to authenticated sockets. Sessions are checked before each pong and every 30 seconds while idle. Logout/session rotation on this server disconnects matching sockets immediately. Expiration or revocation on another process is detected before further diagnostic responses and within 30 seconds for idle sockets. A socket's display name is a handshake snapshot; reconnection refreshes it. Timers/listeners are removed during disconnect/shutdown. No game events or room membership have been added.
+The existing `system:ping` → `system:pong` diagnostic remains available only to authenticated sockets. Sessions are checked before each pong and every 30 seconds while idle. Logout/session rotation on this server disconnects matching sockets immediately. Expiration or revocation on another process is detected before further diagnostic responses and within 30 seconds for idle sockets. A socket's display name is a handshake snapshot; reconnection refreshes it. Timers/listeners are removed during disconnect/shutdown. Room commands extend this authenticated transport as described below; no arena gameplay events are added.
 
 ## Redis and server lifecycle
 
-Redis will later support presence, matchmaking queues, room metadata, distributed coordination, and rate limiting. PostgreSQL remains the durable source of truth. Optional Redis has a bounded connection timeout and no reconnect loop in this phase; unavailable Redis logs a warning and does not block account functions. Restart after restoring Redis. HTTP health is liveness, reporting database `configured` and Redis connection status; it is not a database readiness probe. Authentication needs a reachable, migrated PostgreSQL database.
+Redis now stores room metadata, membership, readiness, host ownership, and lookup indexes. Matchmaking queues and distributed coordination are deferred. PostgreSQL remains the durable source of truth. Optional Redis has a bounded connection timeout and no reconnect loop in this phase; unavailable Redis logs a warning and does not block account functions. Restart after restoring Redis. HTTP health is liveness, reporting database `configured` and Redis connection status; it is not a database readiness probe. Authentication needs a reachable, migrated PostgreSQL database.
 
 Shutdown closes Redis, Socket.IO and the Prisma pool, and stops session-cleanup timers, with a five-second deadline. The future authoritative game simulation still belongs on the persistent server: clients will submit intent; the server will validate movement/combat and decide outcomes. No simulation exists yet.
 
@@ -69,3 +69,41 @@ Start with one server. Horizontal scaling later needs shared rate limiting, revo
 ## Testing and isolation
 
 Backend tests require an explicit TEST_DATABASE_URL whose database name ends in `_test`; they never fall back to DATABASE_URL. Each test file creates a random schema, applies the real migration there, runs real Prisma queries/HTTP/socket connections, and drops only that generated schema. Account cleanup is confined to those schemas. Both the PostgreSQL adapter and migration CLI use the same schema. Browser smoke verification uses a unique throwaway local account and deletes only that account afterward.
+
+## Phase 3 room storage and ownership
+
+Room data is ephemeral and does not justify another PostgreSQL model. The single game-server process owns a unique Redis string key `arena:lobby:v1:<instance-uuid>`. Its JSON snapshot is:
+
+```text
+rooms:       roomId -> room metadata and ordered roster
+codes:       six-character code -> roomId
+playerRooms: playerProfileId -> roomId
+```
+
+Room metadata includes visibility, WAITING/STARTING status, creation time, capacity, code, host ID, and roster. Each member includes only profile ID, username, display name, join time, ready/connected state, and host flag. A private `launchEndsAt` field bounds the placeholder start transition. Safe projections explicitly exclude this internal field and all account/session details. Public discovery is derived from WAITING PUBLIC rooms with spare capacity and excludes codes/private rooms entirely. No separately maintained public index can drift.
+
+Every command enters one promise queue for this service, reads Redis, validates current state/membership/ownership, applies a synchronous mutation, commits the entire snapshot with one atomic SET, updates Socket.IO room subscriptions, and broadcasts authoritative state before acknowledging. Application validation errors do not commit a modified snapshot. This serializes cross-room player mappings as well as per-room capacity checks. Repeated joins to the same room and leaves are idempotent; ready commands set a value rather than toggling from stale client state. Crypto randomInt generates six-character codes with collision retries. A capacity of 100 rooms bounds snapshot size/work per operation. Room size is 2–8.
+
+This is a **single game-server deployment**, not a distributed transaction system. The unique per-process key prevents one restarting process from overwriting an old process's room data, but separate processes would have separate lobbies and no global membership/code guarantees. Multi-instance operation must add owner routing, a global code/player directory, adapter broadcasts, and appropriate distributed atomic operations first. Do not point arbitrary instances at one snapshot: a local queue cannot coordinate multiple writers. Splitting bounded snapshots into per-room Redis structures is a future scaling option.
+
+A 120-second TTL covers the whole snapshot and every nested lookup; a 30-second heartbeat and successful commands refresh it. Graceful shutdown deletes the namespace, and a crash expires it without orphaned lookup keys. Restart intentionally creates fresh rooms rather than claiming durable match recovery. Redis errors return safe UNAVAILABLE acknowledgements; there is no divergent in-memory room fallback. Accounts and HTTP health can still run without Redis. If connectivity is lost during a write, clients should reconnect/sync before retrying an uncertain operation. If disconnect cleanup cannot reach Redis, the namespace TTL bounds stale state. No Redis key/value internals are sent to clients.
+
+## Membership and lifecycle
+
+Creating a room auto-joins its authenticated creator as unready host. Public ID joining cannot access PRIVATE rooms; normalized code joining supports invitations. Joining requires WAITING and spare capacity, and the player-room mapping forbids simultaneous rooms. Roster insertion order is authoritative join order, so host departure promotes the first remaining entry deterministically, including tied timestamps. Final departure deletes metadata, code, and membership together.
+
+A player's newest authenticated socket controls lobby membership; an older tab receives `lobby:replaced` and is disconnected. Replacement occurs before old-socket cleanup, and queued operations recheck current controller ownership, preventing stale sockets from deleting or modifying a new connection's membership. Socket.IO channels named `lobby:room:<id>` are reconciled from the stored snapshot, never from arbitrary client channel names.
+
+Transient transport disconnect marks connected/ready false immediately and reserves membership for five seconds. Reconnect within grace cancels departure and requests current state; readiness must be set again. Grace expiry removes the player, transfers host, and deletes empty rooms. Explicit leave, client navigation disconnect, or server-side session revocation removes membership immediately. A reconnect after grace shows the public lobby; it does not silently invent previous membership. This is lobby refresh support, not Phase 9 full-match reconnection.
+
+Everyone including host must be ready and connected, with at least two members. A host-only start changes WAITING to STARTING and emits `room:ready-to-start`. After two seconds the room returns to WAITING and every ready flag clears. A departure or disconnection cancels STARTING. Timer cleanup and deadline reconciliation on subsequent operations prevent permanent STARTING states after a delayed callback. IN_GAME/CLOSED exist only in shared vocabulary; no match/arena/gameplay transition occurs here.
+
+## Room protocol and frontend
+
+`shared/index.d.ts` is a type-only workspace consumed by both applications. No runtime bundle or duplicate authentication implementation is introduced. Commands are `rooms:list`, `room:sync`, `room:create`, `room:join`, `room:join-code`, `room:leave`, `room:set-ready`, and `room:start`; each has a strict validated payload and required acknowledgement. Success is `{ok:true,data}`; errors expose only `{ok:false,error:{code,message}}`. Missing acknowledgement functions are ignored without mutation. `room:state` and `rooms:list` provide live full-state updates; readiness confirmation and controller replacement have their own small events. No redundant joined/left event stream is required.
+
+One `/play` hook owns the socket through its mount lifecycle. It reconnects with credentials, syncs current state, exposes connection/error/busy state, and removes listeners before disconnecting on unmount. Timeout errors ask the player to reconnect and verify membership, rather than treating uncertain commands as successful. Room controls show current player, host, code/copy feedback, capacity, connected/ready state, and disabled-start reasons. The Phaser engine is not mounted.
+
+All commands revalidate the database session and use server-derived profile identity. Unknown fields/identity payloads are rejected. Limits are per authenticated profile (survive tab replacement): 40 room commands/10 seconds and three create attempts/minute, with eight pending commands/socket. Idle limiter entries expire. The existing 16 KiB inbound Socket.IO bound and origin restriction remain. Codes are invitations, not a replacement for authentication.
+
+Room tests additionally require explicit TEST_REDIS_URL using database /15, use random test keys, and never FLUSHDB. They prove actual Redis snapshots/cleanup/TTL alongside real authenticated sockets and isolated PostgreSQL accounts.

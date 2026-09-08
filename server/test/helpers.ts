@@ -25,11 +25,12 @@ export async function testDatabase() {
  const db = createDatabase(url.toString());
  return { db, async close() { await db.$disconnect(); await pool.query(`DROP SCHEMA "${schema}" CASCADE`); await pool.end(); } };
 }
-export async function testServer(db: Database) {
+import type { RoomService } from "../src/services/rooms.js";
+export async function testServer(db: Database, rooms?: RoomService, graceMs?: number) {
  const config = parseEnv({ NODE_ENV: "test" });
  const auth = createAuthService(db, config);
  const server = createServer(createApp(config, auth));
- const io = attachSocketServer(server, config, auth);
+ const io = attachSocketServer(server, config, auth, rooms, graceMs);
  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
  const address = server.address();
  if (!address || typeof address === "string") throw new Error("Test listener failed");

@@ -1,6 +1,7 @@
-import { io } from "socket.io-client";
+import { io, type Socket } from "socket.io-client";
+import type { ClientToServerEvents, ServerToClientEvents } from "@arena/shared";
 import { clientConfig } from "@/lib/config";
-export function createArenaSocket() {
- // Identity is derived from the HttpOnly cookie by the server, never supplied in auth payloads.
- return io(clientConfig.socketUrl, { withCredentials: true, autoConnect: false, reconnectionAttempts: 3 });
+export type ArenaSocket = Socket<ServerToClientEvents,ClientToServerEvents>;
+export function createArenaSocket(): ArenaSocket {
+ return io(clientConfig.socketUrl, { withCredentials: true, autoConnect: false, reconnectionAttempts: 3, reconnectionDelay: 500, reconnectionDelayMax: 1500 });
 }

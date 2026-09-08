@@ -5,7 +5,9 @@ import type { AuthService } from "../services/auth.js";
 import type { Environment } from "../config/env.js";
 import { readSessionCookie } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
-export function attachSocketServer(httpServer: HttpServer, config: Environment, auth: AuthService) {
+import { configureLobby } from "./rooms.js";
+import type { RoomService } from "../services/rooms.js";
+export function attachSocketServer(httpServer: HttpServer, config: Environment, auth: AuthService, rooms?: RoomService, graceMs?: number) {
  const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(httpServer, {
   cors: { origin: config.frontendUrl, credentials: true, methods: ["GET", "POST"] },
   maxHttpBufferSize: 16_384,
@@ -41,5 +43,7 @@ export function attachSocketServer(httpServer: HttpServer, config: Environment, 
   });
   socket.on("disconnect", reason => { clearInterval(interval); logger.info("socket.disconnected", { socketId: socket.id, reason }); });
  });
+ const closeLobby = configureLobby(io, auth, rooms, graceMs);
+ httpServer.once("close", () => { void closeLobby().catch(() => logger.warn("lobby.shutdown_cleanup_failed")); });
  return io;
 }

@@ -1,0 +1,91 @@
+import type { Server, Socket } from "socket.io";
+import type { z } from "zod";
+import type { Ack, ClientToServerEvents, ServerToClientEvents } from "@arena/shared";
+import type { SocketData } from "../types/socket.js";
+import type { AuthService } from "../services/auth.js";
+import { RoomError, roomInput, roomSchemas, publicRooms, safeRoom, type RoomService } from "../services/rooms.js";
+import { logger } from "../utils/logger.js";
+type LobbySocket = Socket<ClientToServerEvents,ServerToClientEvents,Record<string,never>,SocketData>;
+type LobbyServer = Server<ClientToServerEvents,ServerToClientEvents,Record<string,never>,SocketData>;
+export function configureLobby(io: LobbyServer, auth: AuthService, rooms?: RoomService, graceMs = 5000) {
+ let closing = false;
+ const controllers = new Map<string,LobbySocket>();
+ const departures = new Map<string,ReturnType<typeof setTimeout>>();
+ const limits = new Map<string,{ start: number; count: number; creates: number; createStart: number }>();
+ const limiterCleanup = setInterval(() => { for (const [id,limit] of limits) if (Date.now()-limit.createStart > 120000 && Date.now()-limit.start > 120000) limits.delete(id); },60000).unref();
+ rooms?.setListener(async (state, readyRoomId) => {
+  for (const [id,socket] of controllers) {
+   if (!socket.connected) continue;
+   const roomId = state.playerRooms[id];
+   for (const channel of socket.rooms) if (channel.startsWith("lobby:room:") && channel !== `lobby:room:${roomId}`) await socket.leave(channel);
+   if (roomId) await socket.join(`lobby:room:${roomId}`);
+   else socket.emit("room:state",null);
+  }
+  for (const room of Object.values(state.rooms)) io.to(`lobby:room:${room.id}`).emit("room:state",safeRoom(room));
+  io.emit("rooms:list",publicRooms(state));
+  if (readyRoomId) io.to(`lobby:room:${readyRoomId}`).emit("room:ready-to-start",{ roomId: readyRoomId, message: "Readiness confirmed. Gameplay arrives in Phase 4. Returning to waiting…" });
+ });
+ io.on("connection",socket => {
+  const id = socket.data.playerProfileId;
+  const previous = controllers.get(id);
+  controllers.set(id,socket);
+  clearTimeout(departures.get(id)); departures.delete(id);
+  if (previous && previous !== socket) { previous.emit("lobby:replaced"); previous.disconnect(true); }
+  const active = () => socket.connected && controllers.get(id) === socket;
+  if (rooms) void rooms.connection(id,true,active).catch(() => { if (active()) { socket.emit("room:state",null); socket.emit("rooms:list",[]); } });
+  let pending = 0;
+  function command<T,R>(schema: z.ZodType<T>, action: (service: RoomService, payload: T) => Promise<R>, create = false) {
+   return (payload: T, ack: Ack<R>) => {
+    if (typeof ack !== "function") return;
+    void (async () => {
+     let counted = false;
+     try {
+      if (!active()) throw new RoomError("UNAUTHENTICATED","This lobby connection is no longer active.");
+      const now = Date.now();
+      const limit = limits.get(id) ?? { start: now, count: 0, creates: 0, createStart: now };
+      if (now-limit.start >= 10000) { limit.start = now; limit.count = 0; }
+      if (now-limit.createStart >= 60000) { limit.createStart = now; limit.creates = 0; }
+      limits.set(id,limit);
+      if (++limit.count > 40 || (create && ++limit.creates > 3) || pending >= 8) throw new RoomError("RATE_LIMITED","Too many room commands. Wait a moment and try again.");
+      pending++; counted = true;
+      const input = roomInput(schema,payload);
+      if (!await auth.sessionActive(socket.data.sessionId)) { socket.disconnect(true); throw new RoomError("UNAUTHENTICATED","Please sign in again."); }
+      if (!rooms) throw new RoomError("UNAVAILABLE","The lobby is temporarily unavailable.");
+      const result = await action(rooms,input); ack({ ok: true, data: result });
+     } catch(error) {
+      const safe = error instanceof RoomError ? error : new RoomError("UNAVAILABLE","The lobby is temporarily unavailable. Please try again.");
+      ack({ ok: false, error: { code: safe.code, message: safe.message } });
+     } finally { if (counted) pending--; }
+    })();
+   };
+  }
+  socket.on("rooms:list",command(roomSchemas.empty,service => service.list(active)));
+  socket.on("room:sync",command(roomSchemas.empty,service => service.sync(id,active)));
+  socket.on("room:create",command(roomSchemas.create,(service,input) => service.create(socket.data,input,active),true));
+  socket.on("room:join",command(roomSchemas.join,(service,input) => service.join(socket.data,input.roomId,active)));
+  socket.on("room:join-code",command(roomSchemas.code,(service,input) => service.joinCode(socket.data,input.code,active)));
+  socket.on("room:leave",command(roomSchemas.empty,service => service.leave(id,active)));
+  socket.on("room:set-ready",command(roomSchemas.ready,(service,input) => service.ready(id,input.ready,active)));
+  socket.on("room:start",command(roomSchemas.empty,service => service.start(id,active)));
+  socket.on("disconnect",reason => {
+   if (controllers.get(id) !== socket) return;
+   if (reason === "server shutting down") { controllers.delete(id); return; }
+   const stillDeparted = () => controllers.get(id) === socket && !socket.connected;
+   const leave = () => {
+    departures.delete(id);
+    void rooms?.leave(id,stillDeparted).catch(() => { if (!closing) logger.warn("lobby.disconnect_cleanup_failed"); }).finally(() => { if (stillDeparted()) controllers.delete(id); });
+    if (!rooms) controllers.delete(id);
+   };
+   if (reason === "client namespace disconnect" || reason === "server namespace disconnect") leave();
+   else {
+    void rooms?.connection(id,false,stillDeparted).catch(() => logger.warn("lobby.disconnect_mark_failed"));
+    departures.set(id,setTimeout(leave,graceMs).unref());
+   }
+  });
+ });
+ return async () => {
+  closing = true;
+  clearInterval(limiterCleanup); for (const timer of departures.values()) clearTimeout(timer); departures.clear(); controllers.clear();
+  await rooms?.close();
+ };
+}

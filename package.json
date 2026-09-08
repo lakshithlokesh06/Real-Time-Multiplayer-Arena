@@ -1,1 +1,22 @@
-{"name":"real-time-multiplayer-arena","version":"0.1.0","private":true,"workspaces":["frontend","server"],"engines":{"node":">=22.12.0"},"scripts":{"dev:frontend":"npm run dev -w frontend","dev:server":"npm run dev -w server","lint":"npm run lint --workspaces","typecheck":"npm run typecheck --workspaces","build":"npm run build --workspaces","test":"npm run test -w server","db:validate":"npm run db:validate -w server"}}
+{
+  "name": "real-time-multiplayer-arena",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "server",
+    "shared"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev:frontend": "npm run dev -w frontend",
+    "dev:server": "npm run dev -w server",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test -w server",
+    "db:validate": "npm run db:validate -w server"
+  }
+}

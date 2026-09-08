@@ -1,0 +1,35 @@
+export type Visibility = "PUBLIC" | "PRIVATE";
+export type RoomStatus = "WAITING" | "STARTING" | "IN_GAME" | "CLOSED";
+export interface RoomPlayer {
+ playerProfileId: string; username: string; displayName: string;
+ ready: boolean; connected: boolean; isHost: boolean; joinedAt: string;
+}
+export interface RoomState {
+ id: string; code: string; name: string; visibility: Visibility; status: RoomStatus;
+ hostPlayerProfileId: string; maxPlayers: number; createdAt: string; players: RoomPlayer[];
+}
+export interface PublicRoom {
+ id: string; name: string; hostDisplayName: string; playerCount: number; maxPlayers: number; status: RoomStatus;
+}
+export interface CreateRoomInput { name: string; visibility: Visibility; maxPlayers: number; }
+export type RoomErrorCode = "INVALID_INPUT" | "NOT_FOUND" | "ROOM_FULL" | "ALREADY_IN_ROOM" | "NOT_MEMBER" | "NOT_HOST" | "NOT_READY" | "NOT_WAITING" | "RATE_LIMITED" | "UNAVAILABLE" | "UNAUTHENTICATED";
+export type Result<T> = { ok: true; data: T } | { ok: false; error: { code: RoomErrorCode; message: string } };
+export type Ack<T> = (result: Result<T>) => void;
+export interface ClientToServerEvents {
+ "system:ping": () => void;
+ "rooms:list": (payload: Record<string, never>, ack: Ack<PublicRoom[]>) => void;
+ "room:sync": (payload: Record<string, never>, ack: Ack<RoomState | null>) => void;
+ "room:create": (payload: CreateRoomInput, ack: Ack<RoomState>) => void;
+ "room:join": (payload: { roomId: string }, ack: Ack<RoomState>) => void;
+ "room:join-code": (payload: { code: string }, ack: Ack<RoomState>) => void;
+ "room:leave": (payload: Record<string, never>, ack: Ack<null>) => void;
+ "room:set-ready": (payload: { ready: boolean }, ack: Ack<RoomState>) => void;
+ "room:start": (payload: Record<string, never>, ack: Ack<RoomState>) => void;
+}
+export interface ServerToClientEvents {
+ "system:pong": (payload: { socketId: string; timestamp: string }) => void;
+ "room:state": (room: RoomState | null) => void;
+ "rooms:list": (rooms: PublicRoom[]) => void;
+ "room:ready-to-start": (payload: { roomId: string; message: string }) => void;
+ "lobby:replaced": () => void;
+}

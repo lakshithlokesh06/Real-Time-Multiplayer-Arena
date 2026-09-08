@@ -4,6 +4,7 @@ export function createOptionalRedis(url?: string) {
  const client = url ? createClient({ url, socket: { connectTimeout: 1500, reconnectStrategy: false } }) : undefined;
  client?.on("error", () => logger.warn("redis.unavailable"));
  return {
+  get client() { return client?.isReady ? client : undefined; },
   get status() { return !client ? "disabled" : client.isReady ? "ready" : "unavailable"; },
   async connect() {
    if (!client) return;

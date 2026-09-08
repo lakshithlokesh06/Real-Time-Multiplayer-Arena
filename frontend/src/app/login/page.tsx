@@ -1,3 +1,4 @@
-import { PlaceholderPage } from "@/components/placeholder-page";
+import { AuthGate } from "@/components/auth-gate";
+import { AuthForm } from "@/components/auth-form";
 export const metadata = { title: "Login" };
-export default function Page() { return <PlaceholderPage title="Welcome back." description="Account sign-in will arrive with the authentication phase." />; }
+export default function Login() { return <AuthGate guest><AuthForm /></AuthGate>; }

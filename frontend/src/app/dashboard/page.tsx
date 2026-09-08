@@ -1,3 +1,4 @@
-import { PlaceholderPage } from "@/components/placeholder-page";
+import { AuthGate } from "@/components/auth-gate";
+import { PlayerDashboard } from "@/components/player-dashboard";
 export const metadata = { title: "Dashboard" };
-export default function Page() { return <PlaceholderPage title="Your next match awaits." description="Your player hub and match activity will live here." />; }
+export default function Dashboard() { return <AuthGate><PlayerDashboard /></AuthGate>; }

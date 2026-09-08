@@ -11,7 +11,20 @@ export function parseEnv(source: NodeJS.ProcessEnv) {
  if (redisUrl && !["redis:", "rediss:"].includes(new URL(redisUrl).protocol)) throw new Error("REDIS_URL must use redis:// or rediss://");
  const databaseUrl = source.DATABASE_URL || undefined;
  if (databaseUrl && !["postgres:", "postgresql:"].includes(new URL(databaseUrl).protocol)) throw new Error("DATABASE_URL must use PostgreSQL");
- return { environment, port, frontendUrl, redisUrl, databaseUrl };
+ const sessionTtl = Number(source.SESSION_TTL ?? 604800);
+ if (!Number.isInteger(sessionTtl) || sessionTtl < 300 || sessionTtl > 2592000) throw new Error("SESSION_TTL must be 300–2592000 seconds");
+ const cookieSecure = source.COOKIE_SECURE === undefined ? environment === "production" : source.COOKIE_SECURE === "true";
+ if (source.COOKIE_SECURE !== undefined && !["true", "false"].includes(source.COOKIE_SECURE)) throw new Error("COOKIE_SECURE must be true or false");
+ if (environment === "production" && (!cookieSecure || origin.protocol !== "https:")) throw new Error("Production requires Secure cookies and an HTTPS frontend");
+ const sameSite = source.COOKIE_SAME_SITE ?? "lax";
+ if (!["lax", "strict", "none"].includes(sameSite)) throw new Error("COOKIE_SAME_SITE must be lax, strict, or none");
+ if (sameSite === "none" && !cookieSecure) throw new Error("SameSite=None requires Secure cookies");
+ const cookieSameSite = sameSite as "lax" | "strict" | "none";
+ const sessionCookieName = source.SESSION_COOKIE_NAME ?? (cookieSecure ? "__Host-arena_session" : "arena_session");
+ if (!/^[A-Za-z0-9_-]{1,64}$/.test(sessionCookieName) || (sessionCookieName.startsWith("__Host-") && !cookieSecure)) throw new Error("Invalid session cookie name");
+ const trustProxyHops = Number(source.TRUST_PROXY_HOPS ?? 0);
+ if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0 || trustProxyHops > 5) throw new Error("TRUST_PROXY_HOPS must be 0–5");
+ return { environment, port, frontendUrl, redisUrl, databaseUrl, sessionTtl, sessionCookieName, cookieSecure, cookieSameSite, trustProxyHops };
 }
 export type Environment = ReturnType<typeof parseEnv>;
 export const env = parseEnv(process.env);

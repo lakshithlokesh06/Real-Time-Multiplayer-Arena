@@ -1,11 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
 import { io as connect } from "socket.io-client";
-import { createApp } from "../src/app.js";
 import { parseEnv } from "../src/config/env.js";
 import { createOptionalRedis } from "../src/config/redis.js";
-import { attachSocketServer } from "../src/socket/index.js";
+import { testDatabase, testServer, registration, cookieFrom } from "./helpers.js";
 
 test("environment rejects invalid ports and origins", () => {
  assert.throws(() => parseEnv({ PORT: "NaN" }));
@@ -22,14 +20,12 @@ test("optional Redis tolerates an unavailable service", async () => {
  finally { unavailable.close(); }
 });
 test("HTTP health, errors, and Socket.IO lifecycle", { timeout: 10000 }, async () => {
- const config = parseEnv({ NODE_ENV: "test" });
- const server = createServer(createApp(config));
- const io = attachSocketServer(server, config.frontendUrl);
- await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
- const address = server.address();
- assert.ok(address && typeof address === "object");
- const url = `http://127.0.0.1:${address.port}`;
- const client = connect(url, { autoConnect: false, transports: ["websocket"], reconnection: false });
+ const database = await testDatabase();
+ const server = await testServer(database.db);
+ const { io, url, config } = server;
+ const registered = await server.request("/api/auth/register", "POST", registration);
+ const cookie = cookieFrom(registered);
+ const client = connect(url, { autoConnect: false, transports: ["websocket"], reconnection: false, extraHeaders: { Origin: config.frontendUrl, Cookie: cookie } });
  try {
   const health = await fetch(`${url}/api/health`);
   assert.equal(health.status, 200);
@@ -38,7 +34,7 @@ test("HTTP health, errors, and Socket.IO lifecycle", { timeout: 10000 }, async (
   assert.equal(body.dependencies.redis, "disabled");
   assert.ok(Number.isFinite(Date.parse(body.timestamp)));
   assert.equal((await fetch(`${url}/unknown`)).status, 404);
-  const malformed = await fetch(`${url}/api/health`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{" });
+  const malformed = await fetch(`${url}/api/health`, { method: "POST", headers: { "Content-Type": "application/json", "Origin": config.frontendUrl, "X-Arena-Request": "1" }, body: "{" });
   assert.equal(malformed.status, 400);
   await new Promise<void>((resolve, reject) => { client.once("connect", resolve); client.once("connect_error", reject); client.connect(); });
   const pong = new Promise<{socketId: string; timestamp: string}>(resolve => client.once("system:pong", resolve));
@@ -48,5 +44,5 @@ test("HTTP health, errors, and Socket.IO lifecycle", { timeout: 10000 }, async (
   client.disconnect();
   await disconnected;
   assert.equal(io.sockets.sockets.size, 0);
- } finally { client.disconnect(); await new Promise<void>(resolve => io.close(() => resolve())); }
+ } finally { client.disconnect(); await server.close(); await database.close(); }
 });

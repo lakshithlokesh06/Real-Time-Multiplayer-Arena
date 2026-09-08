@@ -1,0 +1,9 @@
+// Add account, player, and match models in later phases.
+// No database calls or migrations are required by the foundation server.
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+datasource db {
+  provider = "postgresql"
+}

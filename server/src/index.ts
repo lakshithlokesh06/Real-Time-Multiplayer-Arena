@@ -1,0 +1,22 @@
+import { createServer } from "node:http";
+import { createApp } from "./app.js";
+import { env } from "./config/env.js";
+import { createOptionalRedis } from "./config/redis.js";
+import { attachSocketServer } from "./socket/index.js";
+import { logger } from "./utils/logger.js";
+const redis = createOptionalRedis(env.redisUrl);
+const server = createServer(createApp(env, () => redis.status));
+const io = attachSocketServer(server, env.frontendUrl);
+server.on("error", error => { logger.error("server.failed", { message: error.message }); redis.close(); process.exitCode = 1; });
+server.listen(env.port, () => { logger.info("server.listening", { port: env.port }); void redis.connect(); });
+let stopping = false;
+function shutdown() {
+ if (stopping) return;
+ stopping = true;
+ logger.info("server.stopping");
+ const timeout = setTimeout(() => process.exit(1), 5000).unref();
+ redis.close();
+ io.close(() => { clearTimeout(timeout); process.exitCode = 0; });
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

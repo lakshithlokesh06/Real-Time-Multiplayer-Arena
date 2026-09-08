@@ -2,36 +2,54 @@
 
 A production-oriented browser-based multiplayer arena game built with **Next.js, Phaser, Node.js, Socket.IO, PostgreSQL, Prisma, and Redis**.
 
-The project is being developed incrementally with a focus on real-time networking, authoritative server architecture, scalable multiplayer systems, and modern full-stack engineering practices.
+The project is being developed incrementally with a focus on secure player identity, real-time networking, authoritative multiplayer architecture, scalable game systems, and modern full-stack engineering.
 
-> **Current Status:** Phase 1 — Project Foundation & Architecture ✅
+> **Current Status:** Phase 2 — Player Accounts, Authentication & Profiles ✅
 
 ---
 
 ## 📌 Project Overview
 
-Real-Time Multiplayer Arena is a web-based multiplayer game where players will eventually be able to join live matches, move around an arena, fight other players, compete through matchmaking, track statistics, and climb leaderboards.
+Real-Time Multiplayer Arena is a browser-based multiplayer game where players will eventually join live arenas, move and fight in real time, compete through matchmaking, track their performance, and climb competitive leaderboards.
 
-The architecture separates the web/game client from the authoritative multiplayer server so game state and gameplay rules can be securely controlled server-side.
+The application separates the web/game client from an authoritative multiplayer server.
+
+```text
+Browser
+   │
+   ▼
+Next.js + React + Phaser
+   │
+   ├── REST API
+   └── Socket.IO
+          │
+          ▼
+Node.js + Express Game Server
+          │
+          ├── PostgreSQL + Prisma
+          └── Redis
+```
+
+The server is designed to remain authoritative over sensitive gameplay state rather than trusting the browser.
 
 ---
 
-## ✨ Planned Features
+# ✨ Planned Features
 
-The project roadmap includes:
-
-* Player authentication
-* Player profiles
-* Public and private game rooms
-* Real-time multiplayer gameplay
-* Matchmaking
-* Live player movement
-* Server-authoritative game state
-* Combat mechanics
-* Health and damage system
-* Player death and respawning
+* Secure player accounts ✅
+* Player profiles ✅
+* Authenticated realtime connections ✅
+* Public game rooms
+* Private rooms and room codes
+* Player ready system
+* Real-time player movement
+* Authoritative game state
+* Arena combat
+* Health and damage
+* Death and respawning
 * Power-ups
-* Match timers
+* Match lifecycle
+* Matchmaking
 * Match results
 * Player statistics
 * Match history
@@ -40,48 +58,7 @@ The project roadmap includes:
 * Spectator mode
 * AI bots
 * Presence tracking
-* Redis-backed matchmaking
 * Production deployment
-
-Features are being implemented incrementally and unfinished functionality is not represented as complete.
-
----
-
-# 🏗️ Current Architecture
-
-```text
-Browser
-   │
-   ▼
-Next.js + React
-   │
-   ├── User Interface
-   │
-   └── Phaser Game Client
-          │
-          ▼
-     Socket.IO / REST
-          │
-          ▼
-Node.js + Express Game Server
-          │
-          ├── PostgreSQL / Prisma
-          │
-          └── Redis
-```
-
-The game server will act as the **authoritative source of truth** for multiplayer game state.
-
-This approach helps prevent clients from directly controlling important gameplay state such as:
-
-* player positions
-* damage
-* health
-* kills
-* match results
-* score
-* respawning
-* room state
 
 ---
 
@@ -102,15 +79,21 @@ This approach helps prevent clients from directly controlling important gameplay
 * TypeScript
 * Socket.IO
 
-## Database
+## Data & Realtime Infrastructure
 
-* PostgreSQL
+* PostgreSQL 17
 * Prisma ORM
+* Redis 7
 
-## Realtime Infrastructure
+## Security
 
-* Socket.IO
-* Redis
+* Argon2id
+* SHA-256 session token hashing
+* HTTP-only cookies
+* Trusted-origin / custom-header CSRF protection
+* Authentication rate limiting
+* Credentialed CORS
+* Server-side input validation
 
 ## Infrastructure
 
@@ -125,15 +108,19 @@ This approach helps prevent clients from directly controlling important gameplay
 real-time-multiplayer-arena/
 │
 ├── frontend/
-│   ├── app/
-│   ├── components/
-│   ├── game/
-│   ├── hooks/
-│   ├── lib/
-│   ├── services/
-│   └── types/
+│   └── src/
+│       ├── app/
+│       ├── components/
+│       ├── game/
+│       ├── hooks/
+│       ├── lib/
+│       ├── services/
+│       └── types/
 │
 ├── server/
+│   ├── prisma/
+│   │   ├── migrations/
+│   │   └── schema.prisma
 │   ├── src/
 │   │   ├── config/
 │   │   ├── routes/
@@ -143,9 +130,7 @@ real-time-multiplayer-arena/
 │   │   ├── middleware/
 │   │   ├── types/
 │   │   └── utils/
-│   │
-│   ├── prisma/
-│   └── tests/
+│   └── test/
 │
 ├── docs/
 │   ├── architecture.md
@@ -162,304 +147,457 @@ real-time-multiplayer-arena/
 
 ---
 
-# ✅ Phase 1 Implementation
+# 🔐 Authentication
 
-Phase 1 established the complete foundation for the project.
+Phase 2 introduces first-party email/password authentication backed by PostgreSQL.
 
-## Frontend
+Players can:
 
-The frontend is built with:
+* create an account
+* log in
+* restore an existing session
+* log out
+* access authenticated routes
+* update their display name
+* establish authenticated Socket.IO connections
 
-* Next.js
-* React
-* TypeScript
-* Tailwind CSS
+Authentication tokens are never stored in browser-accessible storage.
 
-A responsive dark game-oriented interface has been created along with reusable navigation components.
+---
 
-### Current Routes
+# 🔑 Password Security
+
+Passwords are hashed using **Argon2id** before being persisted.
+
+Plaintext passwords are never stored.
+
+Password hashes are never returned through account API responses.
+
+---
+
+# 🍪 Session Architecture
+
+Authentication uses random opaque server-managed session tokens.
+
+```text
+Login / Registration
+        │
+        ▼
+Generate cryptographically random token
+        │
+        ├──── Raw token ────► HTTP-only cookie
+        │
+        ▼
+      SHA-256
+        │
+        ▼
+Token Hash
+        │
+        ▼
+PostgreSQL Session
+```
+
+Only the SHA-256 hash of the token is stored in PostgreSQL.
+
+Sessions support:
+
+* expiration
+* rotation
+* revocation
+* logout invalidation
+* authenticated REST requests
+* authenticated Socket.IO connections
+
+The raw token is not exposed to frontend JavaScript.
+
+---
+
+# 🗄️ Database Models
+
+Phase 2 added three primary identity models.
+
+## User
+
+Stores core account identity including:
+
+* unique email
+* password hash
+* creation timestamp
+* update timestamp
+
+## PlayerProfile
+
+Stores player-facing identity including:
+
+* unique username
+* display name
+* associated user
+* creation/update timestamps
+
+Each user has one player profile.
+
+## Session
+
+Stores server-side authentication sessions including:
+
+* associated user
+* session token hash
+* expiration
+* session metadata
+
+Raw session tokens are never persisted.
+
+Migration:
+
+```text
+20260908050000_player_accounts
+```
+
+---
+
+# 🌐 Authentication API
+
+### Register
+
+```http
+POST /api/auth/register
+```
+
+Creates:
+
+```text
+User
+ ↓
+PlayerProfile
+ ↓
+Session
+ ↓
+HTTP-only authentication cookie
+```
+
+---
+
+### Login
+
+```http
+POST /api/auth/login
+```
+
+Validates credentials and establishes a new authenticated session.
+
+Invalid credentials use safe generic responses.
+
+---
+
+### Current Player
+
+```http
+GET /api/auth/me
+```
+
+Returns safe account/profile information for the current authenticated player.
+
+Sensitive authentication data is excluded.
+
+---
+
+### Logout
+
+```http
+POST /api/auth/logout
+```
+
+Revokes the server-side session and clears the authentication cookie.
+
+---
+
+### Update Profile
+
+```http
+PATCH /api/profile
+```
+
+Allows authenticated players to update supported profile information such as their display name.
+
+All updates are validated server-side.
+
+---
+
+# 🛡️ Authentication Security
+
+Phase 2 includes:
+
+* Argon2id password hashing
+* random opaque session tokens
+* SHA-256 session token hashing
+* HTTP-only cookies
+* session expiration
+* session rotation
+* logout revocation
+* server-side validation
+* request body limits
+* login/register rate limiting
+* credentialed CORS
+* trusted frontend origin validation
+* custom-header/origin CSRF protection
+* sanitized authentication errors
+* protected REST endpoints
+
+Authentication tokens are not stored in:
+
+```text
+localStorage
+sessionStorage
+client-readable cookies
+```
+
+---
+
+# 🔌 Authenticated Socket.IO
+
+Socket.IO now uses the same authentication system as the REST API.
+
+During the connection handshake:
+
+```text
+Browser
+   │
+   │ HTTP-only session cookie
+   ▼
+Socket.IO Server
+   │
+   ▼
+Session validation
+   │
+   ▼
+PostgreSQL
+   │
+   ▼
+Resolved Player Identity
+```
+
+The server resolves identity itself.
+
+The browser cannot authenticate by simply submitting a user ID or username.
+
+Authenticated socket context contains safe player identity information.
+
+Unauthenticated Socket.IO connections are rejected.
+
+Revoked sessions can no longer maintain authenticated game connections.
+
+The original:
+
+```text
+system:ping → system:pong
+```
+
+flow remains operational.
+
+---
+
+# 🖥️ Frontend
+
+## Public Routes
 
 ```text
 /
- /play
- /login
- /register
- /dashboard
- /leaderboard
- /profile
+/login
+/register
+/leaderboard
 ```
 
-Most application routes are currently placeholders and will be implemented during later phases.
+## Protected Routes
+
+```text
+/dashboard
+/profile
+/play
+```
+
+Unauthenticated users attempting to access protected pages are redirected to login.
+
+Authenticated users opening login/register are redirected appropriately.
 
 ---
 
-# 🎮 Phaser Integration
+# 📝 Registration
 
-Phaser has been configured for use inside the Next.js application.
+The registration page supports:
+
+* email
+* username
+* display name
+* password
+* password confirmation
+* validation feedback
+* loading states
+* accessible form controls
+* responsive layout
+
+Successful registration establishes a session and redirects the player to the dashboard.
+
+---
+
+# 🔓 Login
+
+The login interface provides:
+
+* email/password authentication
+* loading state
+* safe credential errors
+* session establishment
+* automatic authentication-state update
+* dashboard redirect
+
+---
+
+# 📊 Player Dashboard
+
+Authenticated players can access their dashboard.
+
+Current information includes:
+
+* display name
+* username
+* email
+* account creation information
+* player/account status
+
+Future competitive statistics are represented as unavailable rather than fabricated.
+
+Future dashboard systems will include:
+
+* matches played
+* wins
+* eliminations
+* rating
+
+---
+
+# 👤 Player Profile
+
+The profile page displays player identity and account information.
+
+Players can currently edit supported profile fields such as their display name.
+
+All changes are validated by the server.
+
+Avatar storage and advanced profile customization are deferred.
+
+---
+
+# 🧭 Navigation
+
+Navigation responds to authentication state.
+
+### Logged Out
+
+```text
+Login
+Create Account
+```
+
+### Logged In
+
+```text
+Dashboard
+Play
+Profile
+Logout
+```
+
+Player identity is displayed where appropriate.
+
+---
+
+# 🎮 Phaser
+
+Phaser remains integrated through a client-only architecture.
 
 The integration:
 
-* runs only in the browser
-* avoids server-side rendering conflicts
-* prevents duplicate Phaser instances
-* properly destroys the game instance when unmounted
+* avoids SSR conflicts
+* prevents duplicate instances
+* destroys instances when unmounted
 * supports clean remounting
-* separates Phaser game logic from React UI code
+* keeps Phaser logic separated from React
 
-A minimal Phaser preview currently verifies that the game engine initializes correctly.
-
-Actual multiplayer gameplay has not yet been implemented.
-
----
-
-# 🌐 Backend
-
-The multiplayer backend is implemented using:
-
-* Node.js
-* Express
-* TypeScript
-* Socket.IO
-
-The server includes:
-
-* centralized environment configuration
-* structured logging
-* JSON error responses
-* CORS configuration
-* graceful shutdown handling
-* WebSocket connection lifecycle management
+Full multiplayer gameplay begins in later phases.
 
 ---
 
 # ❤️ Health API
 
-Current REST endpoint:
-
-```text
+```http
 GET /api/health
 ```
 
-Local URL:
+Local endpoint:
 
 ```text
 http://localhost:4000/api/health
 ```
 
-The endpoint returns server health information including:
-
-* service name
-* environment
-* status
-* version
-* timestamp
-
 ---
 
-# 🔌 Socket.IO
+# 🐳 Local Infrastructure
 
-Basic Socket.IO communication is operational.
-
-Current event flow:
+Docker Compose provides:
 
 ```text
-system:ping
-     ↓
-system:pong
+PostgreSQL 17 → localhost:5433
+Redis 7       → localhost:6380
 ```
 
-The server also logs:
+Both infrastructure services were connectivity-tested during Phase 2.
 
-* client connections
-* socket IDs
-* client disconnections
+PostgreSQL migrations and real Prisma queries completed successfully.
 
-Game rooms and gameplay networking will be added in future phases.
-
----
-
-# 🗄️ PostgreSQL & Prisma
-
-PostgreSQL has been selected as the project's primary persistent database.
-
-Prisma ORM is configured and validated.
-
-Future database models will support functionality such as:
-
-* users
-* player profiles
-* matches
-* match participants
-* statistics
-* leaderboards
-* game history
-
-The full domain schema has intentionally been deferred until future development phases.
-
----
-
-# ⚡ Redis
-
-Redis support has been prepared for real-time infrastructure.
-
-Redis will eventually handle systems such as:
-
-* player presence
-* matchmaking queues
-* game room metadata
-* distributed server coordination
-* temporary realtime state
-* rate limiting
-
-Redis is currently optional during development.
-
-If Redis is unavailable, the game server can still start normally.
-
----
-
-# 🐳 Docker Infrastructure
-
-Docker Compose provides local infrastructure for:
-
-* PostgreSQL
-* Redis
-
-Current local ports:
+Redis successfully returned:
 
 ```text
-PostgreSQL → 5433
-Redis      → 6380
+PONG
 ```
 
-Persistent Docker volumes are used so database data survives container restarts.
-
-Health checks are configured for infrastructure services.
+and the application reported Redis as ready.
 
 ---
 
-# ⚙️ Environment Variables
-
-Create the required environment files.
-
-Root environment:
-
-```bash
-cp .env.example .env
-```
-
-Frontend environment:
-
-```bash
-cp frontend/.env.example frontend/.env.local
-```
-
-Server environment:
-
-```bash
-cp server/.env.example server/.env
-```
-
-Example configuration includes:
-
-```env
-NEXT_PUBLIC_API_URL=
-NEXT_PUBLIC_SOCKET_URL=
-
-NODE_ENV=
-PORT=
-FRONTEND_URL=
-DATABASE_URL=
-REDIS_URL=
-```
-
-Never commit production secrets or credentials.
-
----
-
-# 🚀 Local Development
+# ⚙️ Local Development
 
 ## Requirements
-
-Install:
 
 * Node.js 24
 * npm
 * Docker
 * Docker Compose
 
----
-
-## 1. Install Dependencies
-
-From the project root:
+Install dependencies:
 
 ```bash
 npm ci
 ```
 
----
-
-## 2. Configure Environment
-
-```bash
-cp .env.example .env
-cp frontend/.env.example frontend/.env.local
-cp server/.env.example server/.env
-```
-
----
-
-## 3. Start PostgreSQL and Redis
+Start infrastructure:
 
 ```bash
 docker compose up -d
 ```
 
-PostgreSQL will run on:
-
-```text
-localhost:5433
-```
-
-Redis will run on:
-
-```text
-localhost:6380
-```
-
----
-
-## 4. Validate Prisma
+Apply database migrations:
 
 ```bash
-npm run db:validate
+npm run db:migrate -w server
 ```
 
----
-
-## 5. Start Backend
+Start the game server:
 
 ```bash
 npm run dev:server
 ```
 
-Backend:
-
-```text
-http://localhost:4000
-```
-
-Health endpoint:
-
-```text
-http://localhost:4000/api/health
-```
-
----
-
-## 6. Start Frontend
-
-Open another terminal:
+Then open another terminal:
 
 ```bash
 npm run dev:frontend
@@ -471,104 +609,147 @@ Frontend:
 http://localhost:3000
 ```
 
+Backend:
+
+```text
+http://localhost:4000
+```
+
+Health:
+
+```text
+http://localhost:4000/api/health
+```
+
 ---
 
 # 🧪 Verification
 
-Phase 1 verification successfully covered:
+Phase 2 verification passed successfully.
 
-* dependency installation
-* frontend linting
-* strict TypeScript validation
-* integration tests
-* Prisma schema validation
+```text
+Backend Tests
+24 passed
+0 failed
+0 skipped
+```
+
+This includes the three original Phase 1 foundation tests and 21 additional tests.
+
+Coverage includes:
+
+* registration
+* duplicate accounts
+* input validation
+* login
+* invalid credentials
+* session restoration
+* logout
+* protected APIs
+* invalid sessions
+* profile updates
+* authenticated Socket.IO
+* unauthenticated Socket.IO rejection
+* sensitive-data protection
+
+Additional verification passed for:
+
+* frontend lint
+* server lint
+* TypeScript checks
+* Prisma validation
 * frontend production build
-* backend production build
-* application route responses
-* Phaser initialization
-* Phaser cleanup and remount behavior
-* Socket.IO connection testing
-* Docker Compose configuration validation
+* server production build
+* PostgreSQL connectivity
+* Redis connectivity
+* database migrations
+* browser registration
+* browser login
+* profile editing
+* protected redirects
+* session restoration
+* cross-tab logout
+* Socket.IO authentication
+* mobile behavior
 
-Three integration tests currently pass.
+No session tokens or password hashes were exposed in account responses or browser storage.
 
 ---
 
-# ⚠️ Current Limitations
+# ⚠️ Known Limitations
 
-The following features are intentionally not implemented yet:
+Currently deferred:
 
-* authentication
-* player database models
+* email verification
+* password recovery
+* OAuth
+* MFA
 * multiplayer rooms
 * matchmaking
-* player movement
+* gameplay synchronization
 * combat
-* game state synchronization
-* health
-* respawning
-* scoring
+* match persistence
+* competitive statistics
 * leaderboards
-* statistics
-* match history
-* reconnect handling
+* reconnection
 * spectators
 * AI bots
+* production deployment
 
-Four Prisma transitive dependency advisories currently remain.
+Authentication rate limiting is currently process-local.
 
-Local Docker infrastructure configuration has been validated, but full PostgreSQL and Redis connectivity testing has not yet been performed.
+Four existing Prisma transitive dependency advisories remain and should be reviewed before production deployment.
 
 ---
 
 # 🗺️ Development Roadmap
 
-## Phase 1 — Foundation ✅
+## Phase 1 — Foundation & Architecture ✅
 
-* Monorepo architecture
 * Next.js frontend
 * Express backend
-* Socket.IO integration
-* Phaser integration
-* PostgreSQL / Prisma foundation
-* Redis foundation
-* Docker infrastructure
-* Environment configuration
-* Health endpoint
+* Phaser
+* Socket.IO
+* PostgreSQL
+* Prisma
+* Redis
+* Docker
 
-## Phase 2 — Player Accounts & Authentication
+## Phase 2 — Player Accounts & Authentication ✅
 
-Planned:
-
-* user database schema
-* account registration
-* login
-* secure authentication
-* player profiles
-* protected routes
-* authenticated Socket.IO connections
+* User accounts
+* Player profiles
+* PostgreSQL sessions
+* Argon2id password hashing
+* HTTP-only authentication
+* Protected routes
+* Profile editing
+* Authenticated Socket.IO
+* Authentication security
 
 ## Phase 3 — Multiplayer Rooms
 
 Planned:
 
-* game rooms
-* player joining/leaving
-* private rooms
-* room codes
-* room lifecycle
+* room creation
+* room browser
+* room joining/leaving
+* private room codes
+* room host
 * player readiness
+* room lifecycle
+* realtime room updates
 
 ## Phase 4 — Real-Time Arena
 
 Planned:
 
+* arena scene
 * player spawning
-* real-time movement
-* Phaser arena
-* server-authoritative positions
+* movement
+* server-authoritative positioning
+* state synchronization
 * interpolation
-* synchronization
 
 ## Phase 5 — Combat
 
@@ -578,7 +759,7 @@ Planned:
 * projectiles
 * health
 * damage
-* deaths
+* eliminations
 * respawning
 
 ## Phase 6 — Match System
@@ -589,16 +770,16 @@ Planned:
 * timers
 * scoring
 * results
-* persisted match records
+* persistent match records
 
 ## Phase 7 — Matchmaking
 
 Planned:
 
-* matchmaking queue
-* Redis integration
-* skill-based matchmaking foundations
-* automated room assignment
+* Redis queue
+* automated matching
+* room assignment
+* matchmaking rating foundations
 
 ## Phase 8 — Competitive Systems
 
@@ -607,13 +788,13 @@ Planned:
 * statistics
 * leaderboards
 * match history
-* player performance tracking
+* player performance
 
 ## Phase 9 — Advanced Multiplayer
 
 Planned:
 
-* reconnect support
+* reconnection
 * spectators
 * AI bots
 * presence
@@ -621,47 +802,48 @@ Planned:
 
 ## Phase 10 — Production Deployment
 
-Target architecture:
+Target:
 
 ```text
-Frontend        → Vercel
-Game Server     → Railway
-PostgreSQL      → Supabase / Neon
-Redis           → Upstash Redis
+Frontend       → Vercel
+Game Server    → Railway
+PostgreSQL     → Supabase / Neon
+Redis          → Upstash Redis
 ```
 
-The project architecture is designed to remain provider-independent.
-
 ---
 
-# 🎯 Project Goal
+# 🎯 Engineering Goals
 
-The goal of Real-Time Multiplayer Arena is not only to build a playable game, but also to demonstrate practical experience with:
+This project is designed to demonstrate practical experience with:
 
-* real-time networking
+* real-time multiplayer networking
 * WebSockets
-* multiplayer architecture
 * authoritative game servers
-* frontend game development
 * Phaser
+* Next.js
 * full-stack TypeScript
+* secure authentication
+* password security
+* session management
 * PostgreSQL
+* Prisma
 * Redis
+* Docker
+* realtime state synchronization
 * scalable backend architecture
-* state synchronization
-* production deployment
 
 ---
 
-## 📊 Current Project Status
+## 📊 Current Status
 
 ```text
-Phase 1/10
+Phase 2/10
 
 Foundation & Architecture     ██████████ 100%
-Authentication                ░░░░░░░░░░   0%
+Authentication & Profiles     ██████████ 100%
 Multiplayer Rooms             ░░░░░░░░░░   0%
-Realtime Arena                ░░░░░░░░░░   0%
+Real-Time Arena               ░░░░░░░░░░   0%
 Combat                        ░░░░░░░░░░   0%
 Match System                  ░░░░░░░░░░   0%
 Matchmaking                   ░░░░░░░░░░   0%

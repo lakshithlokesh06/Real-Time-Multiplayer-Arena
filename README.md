@@ -1,110 +1,128 @@
 # 🎮 Real-Time Multiplayer Arena
 
-A production-oriented browser-based multiplayer arena game built with **Next.js, Phaser, Node.js, Socket.IO, PostgreSQL, Prisma, and Redis**.
+A server-authoritative browser multiplayer arena built with **Next.js, Phaser, Node.js, Socket.IO, PostgreSQL, Prisma, and Redis**.
 
-The project is being developed incrementally with a focus on secure player identity, authoritative multiplayer systems, real-time networking, concurrency-safe room management, scalable infrastructure, and modern full-stack engineering.
+Players can securely create accounts, create or join multiplayer rooms, ready up, launch a match, and move around a synchronized Phaser arena in real time.
 
-> **Current Status:** Phase 3 — Real-Time Multiplayer Rooms & Lobby ✅
+> **Current Status: Phase 4 — Real-Time Arena & Authoritative Movement ✅**
 
 ---
 
-## 📌 Project Overview
+## 🎯 Project Overview
 
-Real-Time Multiplayer Arena is a browser-based multiplayer game where authenticated players can create and join live rooms, interact through real-time Socket.IO connections, and prepare for multiplayer arena matches.
+Real-Time Multiplayer Arena is a full-stack multiplayer engineering project focused on real-time networking and authoritative game-server architecture.
 
-The project uses an authoritative backend so clients cannot directly control sensitive multiplayer state.
+The client sends **player input**, not trusted coordinates. The game server simulates canonical player positions and broadcasts snapshots back to connected clients.
 
 ```text
-Browser
-   │
-   ▼
-Next.js + React
-   │
-   ├── REST
-   └── Socket.IO
-          │
-          ▼
-Node.js + Express Game Server
-          │
-          ├── PostgreSQL + Prisma
-          └── Redis
+Player Input
+     │
+     ▼
+Phaser Client
+     │
+     │ Socket.IO
+     ▼
+Authoritative Game Server
+     │
+     ├── Validate Input
+     ├── Simulate Movement
+     ├── Enforce Boundaries
+     └── Generate Snapshots
+              │
+              ▼
+        Connected Clients
+              │
+        ┌─────┴─────┐
+        ▼           ▼
+   Prediction   Interpolation
 ```
-
-Future gameplay will use Phaser while the Node.js server remains authoritative over game state.
 
 ---
 
 # ✨ Current Features
 
-## Player Identity
+## Authentication
 
-* Secure registration
-* Login/logout
-* PostgreSQL sessions
+* Secure registration and login
 * Argon2id password hashing
-* HTTP-only authentication cookies
+* HTTP-only sessions
+* PostgreSQL-backed session management
 * Player profiles
 * Protected routes
-* Authenticated Socket.IO connections
+* Authenticated Socket.IO
 
-## Multiplayer Rooms
+## Multiplayer Lobby
 
-* Create public rooms
-* Create private rooms
-* Join public rooms
-* Join private rooms using room codes
-* Public room browser
-* Maximum-player limits
-* One active room per player
-* Live room state
-* Player ready states
-* Host ownership
+* Public rooms
+* Private rooms
+* Shareable room codes
+* Public room discovery
+* Capacity enforcement
+* One room per player
+* Ready states
+* Host controls
 * Automatic host transfer
 * Reconnect grace period
-* Live player join/leave updates
-* Room command rate limiting
+* Redis-backed room metadata
+
+## Real-Time Arena
+
+* Phaser 2D arena
+* Multiple synchronized players
+* Server-authoritative movement
+* WASD controls
+* Arrow-key controls
+* Normalized diagonal movement
+* Server-enforced boundaries
+* Client-side prediction
+* Server reconciliation
+* Pending-input replay
+* Remote-player interpolation
+* Smooth camera follow
+* Player labels
+* Arena HUD
+* Network diagnostics
+* Refresh recovery
+* Disconnect recovery
 
 ---
 
 # 🧰 Tech Stack
 
-## Frontend
+### Frontend
 
 * Next.js
 * React
 * TypeScript
 * Tailwind CSS
 * Phaser.js
+* Socket.IO Client
 
-## Backend
+### Backend
 
 * Node.js
 * Express
 * TypeScript
 * Socket.IO
 
-## Database
+### Data
 
 * PostgreSQL 17
 * Prisma ORM
-
-## Real-Time Infrastructure
-
-* Socket.IO
 * Redis 7
 
-## Security
+### Security
 
 * Argon2id
-* SHA-256 session token hashing
+* SHA-256 session-token hashing
 * HTTP-only cookies
 * server-managed sessions
 * trusted-origin protection
+* CORS
 * payload validation
 * rate limiting
-* credentialed CORS
 
-## Infrastructure
+### Infrastructure
 
 * Docker
 * Docker Compose
@@ -114,555 +132,481 @@ Future gameplay will use Phaser while the Node.js server remains authoritative o
 # 🏗️ Architecture
 
 ```text
-                    ┌───────────────────┐
-                    │      Browser      │
-                    │ Next.js + React   │
-                    └─────────┬─────────┘
-                              │
-                   REST + Socket.IO
-                              │
-                              ▼
-                    ┌───────────────────┐
-                    │ Node.js Game      │
-                    │ Server            │
-                    │ Express/Socket.IO │
-                    └─────────┬─────────┘
-                              │
-                  ┌───────────┴───────────┐
-                  ▼                       ▼
-        ┌──────────────────┐    ┌──────────────────┐
-        │ PostgreSQL       │    │ Redis            │
-        │                  │    │                  │
-        │ Accounts         │    │ Rooms            │
-        │ Profiles         │    │ Membership       │
-        │ Sessions         │    │ Ready State      │
-        └──────────────────┘    │ Host Ownership   │
-                                └──────────────────┘
+                  ┌─────────────────────────┐
+                  │      Web Browser        │
+                  │                         │
+                  │ Next.js + React         │
+                  │ Phaser Game Client      │
+                  └────────────┬────────────┘
+                               │
+                       REST + Socket.IO
+                               │
+                               ▼
+                  ┌─────────────────────────┐
+                  │ Authoritative Game      │
+                  │ Server                  │
+                  │                         │
+                  │ Node.js + Express       │
+                  │ Socket.IO               │
+                  │ GameManager             │
+                  │ GameInstance            │
+                  └───────┬─────────┬───────┘
+                          │         │
+                          ▼         ▼
+                   PostgreSQL     Redis
+                   + Prisma
 ```
 
-PostgreSQL handles persistent identity data.
+### PostgreSQL
 
-Redis handles ephemeral realtime lobby state.
+Stores durable application data:
 
----
+* users
+* profiles
+* sessions
 
-# 🔐 Authentication
+### Redis
 
-Authentication uses server-managed opaque sessions.
-
-```text
-Registration / Login
-        │
-        ▼
-Random Session Token
-        │
-        ├── Raw token → HTTP-only cookie
-        │
-        ▼
-      SHA-256
-        │
-        ▼
-Session Token Hash
-        │
-        ▼
-PostgreSQL
-```
-
-Passwords are protected with **Argon2id**.
-
-Raw session tokens are never persisted.
-
-Authentication tokens are not stored in:
-
-```text
-localStorage
-sessionStorage
-client-readable cookies
-```
-
----
-
-# 🗄️ PostgreSQL Models
-
-Current core models:
-
-## User
-
-Stores:
-
-* unique email
-* password hash
-* timestamps
-
-## PlayerProfile
-
-Stores:
-
-* unique username
-* display name
-* account relationship
-
-## Session
-
-Stores:
-
-* hashed session token
-* associated user
-* expiration
-* session state
-
-Phase 3 required **no PostgreSQL schema changes or migrations**.
-
----
-
-# ⚡ Redis Room Architecture
-
-Phase 3 introduces Redis-backed multiplayer room state.
-
-Redis tracks ephemeral data such as:
+Stores ephemeral multiplayer metadata:
 
 * rooms
 * memberships
-* room-code lookup
-* ready state
+* room codes
+* readiness
 * host ownership
-* player-to-room association
+* room status
+* game identifiers
 
-Room information is stored under a namespaced snapshot architecture.
+### Game-Server Memory
 
-Room mutations are serialized and persisted atomically to prevent obvious concurrency problems.
+Stores high-frequency active gameplay state:
 
-This protects cases such as two players attempting to take the final room slot at the same time.
+* positions
+* movement input
+* input sequence numbers
+* connection state
+* active simulation state
 
-Redis state includes cleanup behavior using:
-
-* TTL
-* room deletion
-* membership cleanup
-* server shutdown cleanup
-
-Rooms currently do not survive a full game-server restart.
+Player positions are deliberately **not written to PostgreSQL or Redis every tick**.
 
 ---
 
-# 🎮 Multiplayer Lobby
+# 🔐 Authentication Architecture
 
-Authenticated players can access:
+Authentication uses random opaque session tokens.
+
+```text
+Login
+  │
+  ▼
+Random Session Token
+  │
+  ├──── Raw token ────► HTTP-only Cookie
+  │
+  ▼
+SHA-256
+  │
+  ▼
+Token Hash
+  │
+  ▼
+PostgreSQL Session
+```
+
+Passwords use **Argon2id**.
+
+Socket.IO uses the same authenticated session as the REST API.
+
+Clients cannot prove identity by submitting a user ID or username.
+
+---
+
+# 🏠 Multiplayer Rooms
+
+Players access the multiplayer experience through:
 
 ```text
 /play
 ```
 
-The page now acts as the multiplayer lobby.
-
 Players can:
 
-* browse public rooms
 * create public rooms
 * create private rooms
-* join public rooms
-* enter a private room code
-* view connection status
-* join a realtime lobby
-
-Phaser gameplay is intentionally not loaded yet.
-
----
-
-# 🏠 Creating Rooms
-
-Players can create rooms with:
-
-* room name
-* visibility
-* maximum players
-
-Supported visibility:
-
-```text
-PUBLIC
-PRIVATE
-```
-
-Rooms receive a randomly generated human-friendly room code.
-
-Example:
-
-```text
-K7M4PX
-```
-
-The creator automatically becomes:
-
-* first member
-* room host
-
-A player cannot belong to multiple rooms simultaneously.
-
----
-
-# 🌍 Public Rooms
-
-Public rooms appear in the room browser.
-
-Safe room information includes:
-
-* room name
-* host
-* current player count
-* maximum players
-* room status
-* join availability
+* browse public rooms
+* join rooms
+* enter private room codes
+* ready up
+* start matches
+* leave rooms
 
 Private rooms are excluded from public discovery.
 
 ---
 
-# 🔒 Private Rooms
+# 👑 Room Host
 
-Private rooms can be joined using their room code.
+The creator initially becomes host.
 
-Private room information is not leaked through the public room browser.
+If the host leaves before a match, ownership transfers to the earliest-joined remaining player.
 
-Room-code input is normalized and validated by the server.
-
----
-
-# 👥 Room State
-
-Each room maintains authoritative information including:
-
-* room ID
-* room code
-* name
-* visibility
-* status
-* host
-* maximum players
-* creation time
-* players
-
-Player room information includes:
-
-* player profile ID
-* username
-* display name
-* ready state
-* host status
-* join order/time
-
-Sensitive information such as email addresses, session information, password hashes, and Redis internals are never exposed through room state.
+Once gameplay begins, simulation authority belongs to the **server**, not the room host.
 
 ---
 
-# 👑 Host System
+# ✅ Match Start
 
-The room creator initially becomes host.
+All players, including the host, must be ready.
 
-If the host leaves, host ownership automatically transfers.
-
-The new host is:
-
-> The earliest-joined remaining player.
-
-This deterministic rule prevents clients from deciding host ownership themselves.
-
----
-
-# ✅ Ready System
-
-Each player has a server-authoritative ready state.
-
-Players can toggle:
-
-```text
-READY
-NOT READY
-```
-
-All players, including the host, must be ready before the room can start.
-
-Ready-state changes are immediately synchronized to other connected players.
-
-Clients cannot modify another player's readiness.
-
----
-
-# 🚀 Start Validation
-
-Only the room host can request a start.
-
-The server validates:
-
-* caller is the host
-* enough players are present
-* every player is ready
-* room is currently waiting
-
-When valid:
+Only the host can initiate the match.
 
 ```text
 WAITING
-   ↓
+   │
+   ▼
 STARTING
-   ↓
-Ready confirmation
-   ↓
-WAITING
+   │
+   ▼
+IN_GAME
 ```
 
-The room currently remains in `STARTING` for approximately two seconds before returning to `WAITING`.
+The server:
 
-This Phase 3 transition verifies that the room is ready to launch without starting actual gameplay.
-
-Phase 4 will replace this placeholder behavior with the real Phaser arena transition.
+1. validates host authority
+2. verifies player count
+3. verifies readiness
+4. generates a match ID
+5. creates the authoritative game instance
+6. assigns spawn locations
+7. transitions players into the Phaser arena
 
 ---
 
-# 🔌 Socket.IO Room Protocol
+# 🎮 Phaser Arena
 
-Phase 3 added typed realtime room commands.
-
-Client → Server:
+Current world dimensions:
 
 ```text
-rooms:list
-room:sync
-room:create
-room:join
-room:join-code
-room:leave
-room:set-ready
-room:start
+1600 × 900
 ```
 
-Socket connections remain authenticated using the player's server-side session.
+The arena uses original procedural graphics rather than external copyrighted game assets.
 
-The server never trusts a client-provided user ID or username as authentication.
+It includes:
+
+* dark arena styling
+* floor/grid treatment
+* visible boundaries
+* player markers
+* player names
+* local-player identification
+* bounded camera
 
 ---
 
-# 🔄 Reconnect Handling
+# 🕹️ Controls
 
-Temporary transport interruptions receive a:
+Move with:
 
 ```text
-5-second grace period
+W A S D
 ```
 
-This allows short network interruptions or page reconnects without instantly removing the player from the room.
+or:
 
-If the player reconnects within the grace period, their room can be restored.
+```text
+Arrow Keys
+```
 
-Explicit actions such as:
+Diagonal movement is normalized.
 
-* Leave Room
-* Logout
+Current authoritative movement speed:
 
-remove membership immediately.
+```text
+260 units / second
+```
 
-Opening another lobby tab replaces the previous active lobby controller.
-
-Full in-match reconnection is deferred to a later phase.
-
----
-
-# ⚔️ Concurrency Protection
-
-Room state changes are server-controlled.
-
-Serialized commands and atomic Redis writes protect against race conditions such as:
-
-* simultaneous final-slot joins
-* duplicate joins
-* duplicate leave requests
-* repeated ready changes
-* concurrent room modifications
-* repeated start requests
-
-The server remains the source of truth.
+The client cannot choose its own movement speed.
 
 ---
 
-# 🛡️ Multiplayer Security
+# 🖥️ Server Simulation
 
-Room commands require authenticated Socket.IO connections.
+Gameplay uses a fixed authoritative simulation loop.
 
-Phase 3 includes protection against:
+```text
+Simulation Rate: 20 Hz
+Snapshot Rate:   10 Hz
+```
 
-* player impersonation
-* private-room information leakage
-* invalid payloads
-* oversized/invalid values
-* multiple-room membership
-* room-capacity bypass
-* unauthorized ready changes
-* unauthorized host actions
-* excessive room-command spam
+The simulation is independent of browser frame rate.
 
-Player identity always comes from the authenticated server-side socket context.
+One game-server process can manage multiple active game instances through the shared simulation architecture.
+
+The simulation loop does not perform PostgreSQL or Redis writes every tick.
 
 ---
 
-# 🧭 Room UI
+# 📡 Movement Protocol
 
-After joining a room, the player can see:
+Clients send **movement intent**, not positions.
 
-* room name
-* room code
-* copy-code control
-* room visibility
-* room status
+Conceptually:
+
+```text
+{
+  up,
+  down,
+  left,
+  right,
+  sequence
+}
+```
+
+The server determines:
+
+```text
+position
+speed
+movement delta
+boundary enforcement
+processed input sequence
+```
+
+Clients cannot submit authoritative coordinates.
+
+---
+
+# ⚡ Client-Side Prediction
+
+Waiting for every server snapshot before moving the local character would make controls feel delayed.
+
+The local Phaser client therefore predicts movement immediately.
+
+```text
+Keyboard Input
+     │
+     ├──────────────► Local Prediction
+     │
+     ▼
+Game Server
+     │
+     ▼
+Authoritative Position
+```
+
+The server remains authoritative.
+
+---
+
+# 🔄 Server Reconciliation
+
+Movement inputs use increasing sequence numbers.
+
+The server acknowledges processed inputs through authoritative snapshots.
+
+When the client receives a snapshot:
+
+1. use authoritative server position
+2. remove acknowledged inputs
+3. replay pending inputs
+4. correct prediction error
+
+This allows responsive controls without trusting the browser as the source of truth.
+
+---
+
+# 🌐 Remote Player Interpolation
+
+Remote players are rendered using buffered interpolation rather than directly snapping to each incoming position.
+
+Current interpolation delay:
+
+```text
+120 ms
+```
+
+Conceptually:
+
+```text
+Snapshot A             Snapshot B
+    ●----------------------●
+              ↑
+       interpolated
+          position
+```
+
+This produces smoother remote movement despite snapshots arriving at 10 Hz.
+
+---
+
+# 📷 Camera
+
+The Phaser camera:
+
+* follows the local player
+* moves smoothly
+* respects world boundaries
+* responds to viewport resizing
+
+Gameplay coordinates remain based on the logical world rather than browser dimensions.
+
+---
+
+# 📊 Arena HUD
+
+The arena interface currently displays information such as:
+
+* room/match identity
 * player count
-* host
-* roster
-* ready states
-* current player indicator
-* connection status
+* connection state
+* movement controls
+* Leave Arena
 
-Controls include:
+A development network diagnostics overlay is available but disabled by default.
 
-* Ready / Not Ready
-* Leave Room
-* Start Match
+Diagnostics can expose useful non-sensitive information such as:
 
-Host-only actions appear only for the host.
-
-Start controls explain when readiness requirements are not satisfied.
-
----
-
-# 📡 Realtime UI Updates
-
-Room state updates automatically when:
-
-* a player joins
-* a player leaves
-* host ownership changes
-* readiness changes
-* room status changes
-
-Manual browser refresh is not required for normal lobby updates.
-
-Socket listeners are centrally managed to avoid duplicated realtime connections.
+* socket state
+* server tick
+* snapshot activity
+* latency
+* predicted position
+* authoritative position
 
 ---
 
-# 🧪 Verification
+# 🔄 Disconnect & Recovery
 
-Phase 3 verification completed successfully.
+Temporary connection loss uses a:
 
 ```text
-55 tests passed
-0 failed
-0 skipped
+5-second reconnect grace period
 ```
 
-This includes:
+During the grace period the disconnected player's movement is frozen.
 
-```text
-24 existing tests
-31 new multiplayer-room tests
-```
+If the player reconnects in time:
 
-Coverage includes:
+* identity is restored
+* current game membership is restored
+* authoritative position is retained
+* Phaser is reconstructed safely
 
-* authenticated room creation
-* public/private room behavior
-* room validation
-* unique room codes
-* room joining
-* room capacity
-* duplicate membership
-* one-room enforcement
-* room leaving
-* host transfer
-* empty-room cleanup
-* ready-state changes
-* host permissions
-* start requirements
-* disconnect handling
-* reconnection grace period
-* concurrent joins
-* authenticated sockets
-* safe payloads
-* rate limiting
+Refreshing `/play` therefore does not automatically respawn the player.
 
 ---
 
-# 🌐 Browser Verification
+# 🖥️ Multiple Tabs
 
-Two authenticated browser sessions were used to verify multiplayer behavior.
+Only the newest active game/lobby controller may control a player.
+
+Older connections stop controlling gameplay.
+
+This prevents multiple browser tabs from simultaneously submitting movement for the same authenticated player.
+
+---
+
+# 🛡️ Anti-Cheat Foundation
+
+The authoritative architecture prevents clients from directly:
+
+* submitting positions
+* choosing movement speed
+* moving another player
+* spoofing player identity
+* controlling a game they do not belong to
+* moving before the match begins
+* continuing control after removal
+* manipulating the server simulation tick
+
+This provides an anti-cheat foundation rather than a complete anti-cheat system.
+
+---
+
+# 🧪 Testing
+
+Phase 4 verification:
+
+```text
+Backend tests:      80
+Networking tests:    6
+-----------------------
+Total:              86
+
+Failed:              0
+```
+
+All previous applicable tests remain covered.
+
+Testing includes:
+
+* room-to-game transition
+* authoritative spawning
+* movement processing
+* movement speed
+* diagonal normalization
+* world boundaries
+* malformed input
+* unauthorized input
+* sequence processing
+* snapshots
+* player leaving
+* reconnect grace
+* refresh recovery
+* controller ownership
+* game cleanup
+* prediction
+* reconciliation
+* interpolation
+
+---
+
+# 🌐 Multiplayer Browser Verification
+
+Two authenticated browser sessions were used for end-to-end multiplayer verification.
 
 Verified:
 
-* public room creation
-* public room discovery
-* player joining
-* realtime roster updates
-* private-room creation
-* private-room code joining
-* readiness synchronization
-* host start validation
-* status reset
-* reconnect/refresh recovery
-* host transfer
-* mobile layout
-
-Frontend/server lint, TypeScript checks, Prisma validation, production builds, Redis cleanup, and infrastructure checks also passed.
+* room creation
+* second player joining
+* ready states
+* match start
+* both clients entering Phaser
+* Player A movement visible to Player B
+* Player B movement visible to Player A
+* equal cardinal/diagonal speed
+* world boundaries
+* refresh recovery
+* leaving the arena
+* mobile/tablet behavior
+* browser console health
 
 ---
 
 # ⚙️ Local Development
 
-## Requirements
-
-* Node.js 24
-* npm
-* Docker
-* Docker Compose
-
-On the current development machine, use:
-
-```bash
-export PATH=/Users/lakshithlokesh/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH
-```
-
-Install dependencies:
-
-```bash
-npm ci
-```
-
-Start PostgreSQL and Redis:
+Start infrastructure:
 
 ```bash
 docker compose up -d
 ```
 
-Apply database migrations:
+Apply migrations:
 
 ```bash
 npm run db:migrate -w server
 ```
 
-Start the backend:
+Start the server:
 
 ```bash
 npm run dev:server
 ```
 
-Backend:
-
-```text
-http://localhost:4000
-```
-
 In another terminal:
 
 ```bash
-export PATH=/Users/lakshithlokesh/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH
-
 npm run dev:frontend
 ```
 
@@ -672,152 +616,154 @@ Frontend:
 http://localhost:3000
 ```
 
-Multiplayer lobby:
+Backend:
+
+```text
+http://localhost:4000
+```
+
+Multiplayer:
 
 ```text
 http://localhost:3000/play
+```
+
+### Current-machine Node runtime
+
+If required on the current development machine:
+
+```bash
+export PATH=/Users/lakshithlokesh/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH
 ```
 
 ---
 
 # ⚠️ Current Limitations
 
-Current multiplayer architecture runs on:
+Current live simulation supports a **single game-server process**.
 
-```text
-1 game-server instance
-```
+Not yet implemented:
 
-Room state does not survive a complete server restart.
-
-The following remain intentionally deferred:
-
-* Phaser arena gameplay
-* realtime movement
-* player physics
 * combat
+* weapons
+* projectiles
 * health
 * damage
 * eliminations
 * respawning
-* power-ups
-* persistent matches
+* scoring
+* match timer
+* win conditions
+* durable match recovery
 * matchmaking
-* statistics
-* leaderboards
+* persistent statistics
+* competitive leaderboard data
 * spectators
 * AI bots
-* full match reconnection
-* multi-server room coordination
-* production deployment
+* touch movement controls
+* multi-server live simulation
 
-Four existing Prisma transitive dependency advisories remain.
+Packet loss or significant latency can still result in visible reconciliation corrections.
+
+Existing Prisma dependency findings remain documented.
 
 ---
 
-# 🗺️ Development Roadmap
+# 🗺️ Roadmap
 
-## Phase 1 — Foundation & Architecture ✅
+### Phase 1 — Foundation & Architecture ✅
 
 * Next.js
 * Express
 * Socket.IO
 * Phaser foundation
 * PostgreSQL
-* Prisma
 * Redis
 * Docker
 
-## Phase 2 — Accounts & Authentication ✅
+### Phase 2 — Authentication & Profiles ✅
 
-* User accounts
-* Player profiles
+* accounts
+* profiles
 * secure sessions
-* Argon2id
 * protected routes
-* authenticated Socket.IO
+* authenticated sockets
 
-## Phase 3 — Multiplayer Rooms ✅
+### Phase 3 — Multiplayer Rooms ✅
 
-* public rooms
-* private rooms
+* public/private rooms
 * room codes
-* realtime room browser
-* Redis-backed room state
-* host ownership
-* host transfer
+* Redis state
+* host system
 * readiness
-* reconnect grace period
-* concurrency protection
-* multiplayer lobby UI
+* realtime lobby
+* reconnect grace
 
-## Phase 4 — Real-Time Arena
-
-Planned:
+### Phase 4 — Real-Time Arena ✅
 
 * Phaser arena
-* player entities
+* server-authoritative simulation
 * spawning
-* keyboard controls
-* realtime movement
-* authoritative server simulation
-* movement validation
-* snapshots
+* movement
+* prediction
+* reconciliation
 * interpolation
-* latency-aware synchronization
+* snapshots
+* camera
+* refresh recovery
 
-## Phase 5 — Combat
+### Phase 5 — Combat
 
 Planned:
 
+* player health
+* aiming
 * attacks
 * projectiles
-* health
-* damage
-* deaths
+* server-authoritative damage
 * eliminations
 * respawning
+* combat HUD
 
-## Phase 6 — Match System
+### Phase 6 — Match System
 
 Planned:
 
-* match lifecycle
-* timer
+* match timer
 * scoring
 * win conditions
-* match results
+* results
 * persistent match records
 
-## Phase 7 — Matchmaking
+### Phase 7 — Matchmaking
 
 Planned:
 
 * Redis matchmaking queue
-* automated room assignment
-* skill/rating foundations
+* automated matching
+* rating foundations
 
-## Phase 8 — Competitive Systems
+### Phase 8 — Competitive Systems
 
 Planned:
 
-* statistics
-* leaderboards
+* player statistics
 * match history
-* performance tracking
+* leaderboards
+* performance analytics
 
-## Phase 9 — Advanced Multiplayer
+### Phase 9 — Advanced Multiplayer
 
 Planned:
 
-* full reconnection
+* durable reconnection
 * spectators
 * AI bots
-* improved presence
+* presence improvements
 * network resilience
 * multi-instance foundations
 
-## Phase 10 — Production Deployment
+### Phase 10 — Production Deployment
 
 Target:
 
@@ -830,39 +776,39 @@ Redis          → Upstash Redis
 
 ---
 
-# 🎯 Engineering Goals
+# 🎯 Engineering Focus
 
 This project demonstrates practical experience with:
 
 * real-time multiplayer networking
+* authoritative game-server architecture
 * Socket.IO
-* WebSockets
-* authenticated realtime systems
-* authoritative servers
-* concurrency management
+* server simulation loops
+* state snapshots
+* client-side prediction
+* server reconciliation
+* remote interpolation
+* Phaser
+* full-stack TypeScript
 * Redis
 * PostgreSQL
 * Prisma
 * secure authentication
-* Next.js
-* React
-* TypeScript
-* Phaser
+* concurrency
 * Docker
-* realtime state synchronization
-* distributed-system foundations
+* anti-cheat architecture
 
 ---
 
 # 📊 Current Status
 
 ```text
-Phase 3/10
+Phase 4/10
 
 Foundation & Architecture     ██████████ 100%
 Authentication & Profiles     ██████████ 100%
 Multiplayer Rooms             ██████████ 100%
-Real-Time Arena               ░░░░░░░░░░   0%
+Real-Time Arena               ██████████ 100%
 Combat                        ░░░░░░░░░░   0%
 Match System                  ░░░░░░░░░░   0%
 Matchmaking                   ░░░░░░░░░░   0%

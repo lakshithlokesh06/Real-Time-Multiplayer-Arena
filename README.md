@@ -2,39 +2,42 @@
 
 A server-authoritative browser multiplayer arena built with **Next.js, Phaser, Node.js, Socket.IO, PostgreSQL, Prisma, and Redis**.
 
-Players can securely create accounts, create or join multiplayer rooms, ready up, launch a match, and move around a synchronized Phaser arena in real time.
+Players can securely create accounts, join multiplayer rooms, enter a synchronized Phaser arena, move in real time, aim, fire projectiles, deal damage, eliminate opponents, and respawn.
 
-> **Current Status: Phase 4 — Real-Time Arena & Authoritative Movement ✅**
+> **Current Status: Phase 5 — Server-Authoritative Combat ✅**
 
 ---
 
-## 🎯 Project Overview
+## 📌 Project Overview
 
-Real-Time Multiplayer Arena is a full-stack multiplayer engineering project focused on real-time networking and authoritative game-server architecture.
+Real-Time Multiplayer Arena is a full-stack multiplayer engineering project focused on real-time networking, authoritative simulation, secure player identity, synchronized gameplay, and anti-cheat-oriented server design.
 
-The client sends **player input**, not trusted coordinates. The game server simulates canonical player positions and broadcasts snapshots back to connected clients.
+The browser sends player intent.
+
+The server decides the authoritative result.
 
 ```text
-Player Input
-     │
-     ▼
+Input
+  │
+  ▼
 Phaser Client
-     │
-     │ Socket.IO
-     ▼
+  │
+  │ Socket.IO
+  ▼
 Authoritative Game Server
-     │
-     ├── Validate Input
-     ├── Simulate Movement
-     ├── Enforce Boundaries
-     └── Generate Snapshots
-              │
-              ▼
-        Connected Clients
-              │
-        ┌─────┴─────┐
-        ▼           ▼
-   Prediction   Interpolation
+  │
+  ├── Movement Validation
+  ├── Projectile Creation
+  ├── Collision Detection
+  ├── Damage
+  ├── Eliminations
+  └── Respawning
+         │
+         ▼
+Authoritative Snapshots
+         │
+         ▼
+Connected Clients
 ```
 
 ---
@@ -56,9 +59,7 @@ Authoritative Game Server
 * Public rooms
 * Private rooms
 * Shareable room codes
-* Public room discovery
-* Capacity enforcement
-* One room per player
+* Room discovery
 * Ready states
 * Host controls
 * Automatic host transfer
@@ -70,26 +71,38 @@ Authoritative Game Server
 * Phaser 2D arena
 * Multiple synchronized players
 * Server-authoritative movement
-* WASD controls
-* Arrow-key controls
-* Normalized diagonal movement
-* Server-enforced boundaries
+* WASD / arrow-key controls
 * Client-side prediction
 * Server reconciliation
-* Pending-input replay
-* Remote-player interpolation
-* Smooth camera follow
-* Player labels
-* Arena HUD
-* Network diagnostics
+* Remote interpolation
+* Server-enforced boundaries
+* Smooth camera
 * Refresh recovery
-* Disconnect recovery
+
+## Combat
+
+* Mouse aiming
+* Basic Blaster
+* Server-authoritative shooting
+* Projectiles
+* Swept collision detection
+* Health
+* Damage
+* Eliminations
+* Death state
+* Respawning
+* Live elimination/death counters
+* Health bars
+* Hit feedback
+* Respawn countdown
+* Projectile rendering
+* Combat HUD
 
 ---
 
 # 🧰 Tech Stack
 
-### Frontend
+## Frontend
 
 * Next.js
 * React
@@ -98,31 +111,30 @@ Authoritative Game Server
 * Phaser.js
 * Socket.IO Client
 
-### Backend
+## Backend
 
 * Node.js
 * Express
 * TypeScript
 * Socket.IO
 
-### Data
+## Data
 
 * PostgreSQL 17
 * Prisma ORM
 * Redis 7
 
-### Security
+## Security
 
 * Argon2id
 * SHA-256 session-token hashing
 * HTTP-only cookies
-* server-managed sessions
 * trusted-origin protection
 * CORS
-* payload validation
+* input validation
 * rate limiting
 
-### Infrastructure
+## Infrastructure
 
 * Docker
 * Docker Compose
@@ -132,98 +144,97 @@ Authoritative Game Server
 # 🏗️ Architecture
 
 ```text
-                  ┌─────────────────────────┐
-                  │      Web Browser        │
-                  │                         │
-                  │ Next.js + React         │
-                  │ Phaser Game Client      │
-                  └────────────┬────────────┘
-                               │
-                       REST + Socket.IO
-                               │
-                               ▼
-                  ┌─────────────────────────┐
-                  │ Authoritative Game      │
-                  │ Server                  │
-                  │                         │
-                  │ Node.js + Express       │
-                  │ Socket.IO               │
-                  │ GameManager             │
-                  │ GameInstance            │
-                  └───────┬─────────┬───────┘
-                          │         │
-                          ▼         ▼
-                   PostgreSQL     Redis
-                   + Prisma
+                   ┌──────────────────────────┐
+                   │        Browser           │
+                   │                          │
+                   │ Next.js + React          │
+                   │ Phaser                   │
+                   └────────────┬─────────────┘
+                                │
+                        REST + Socket.IO
+                                │
+                                ▼
+                   ┌──────────────────────────┐
+                   │ Authoritative Game       │
+                   │ Server                   │
+                   │                          │
+                   │ Node.js + Express        │
+                   │ Socket.IO                │
+                   │ GameManager              │
+                   │ GameInstance             │
+                   │ Combat Simulation        │
+                   └─────────┬────────┬───────┘
+                             │        │
+                             ▼        ▼
+                      PostgreSQL    Redis
 ```
 
 ### PostgreSQL
 
-Stores durable application data:
+Stores durable identity data:
 
 * users
-* profiles
+* player profiles
 * sessions
 
 ### Redis
 
 Stores ephemeral multiplayer metadata:
 
-* rooms
-* memberships
+* room state
+* room membership
 * room codes
 * readiness
 * host ownership
-* room status
 * game identifiers
 
-### Game-Server Memory
+### In-Memory Game Simulation
 
-Stores high-frequency active gameplay state:
+Stores high-frequency gameplay state:
 
-* positions
-* movement input
-* input sequence numbers
-* connection state
-* active simulation state
+* player positions
+* inputs
+* health
+* projectiles
+* eliminations
+* respawn state
+* active game state
 
-Player positions are deliberately **not written to PostgreSQL or Redis every tick**.
+High-frequency combat state is not written to PostgreSQL or Redis per tick.
 
 ---
 
-# 🔐 Authentication Architecture
+# 🔐 Authentication
 
 Authentication uses random opaque session tokens.
 
 ```text
-Login
-  │
-  ▼
+Login / Registration
+        │
+        ▼
 Random Session Token
-  │
-  ├──── Raw token ────► HTTP-only Cookie
-  │
-  ▼
-SHA-256
-  │
-  ▼
+        │
+        ├── Raw token → HTTP-only Cookie
+        │
+        ▼
+      SHA-256
+        │
+        ▼
 Token Hash
-  │
-  ▼
-PostgreSQL Session
+        │
+        ▼
+PostgreSQL
 ```
 
 Passwords use **Argon2id**.
 
-Socket.IO uses the same authenticated session as the REST API.
-
-Clients cannot prove identity by submitting a user ID or username.
+Authenticated Socket.IO connections reuse the same secure session.
 
 ---
 
 # 🏠 Multiplayer Rooms
 
-Players access the multiplayer experience through:
+Players enter multiplayer through:
 
 ```text
 /play
@@ -233,32 +244,13 @@ Players can:
 
 * create public rooms
 * create private rooms
-* browse public rooms
-* join rooms
-* enter private room codes
+* join public rooms
+* join private rooms using room codes
 * ready up
 * start matches
 * leave rooms
 
-Private rooms are excluded from public discovery.
-
----
-
-# 👑 Room Host
-
-The creator initially becomes host.
-
-If the host leaves before a match, ownership transfers to the earliest-joined remaining player.
-
-Once gameplay begins, simulation authority belongs to the **server**, not the room host.
-
----
-
-# ✅ Match Start
-
-All players, including the host, must be ready.
-
-Only the host can initiate the match.
+Match lifecycle:
 
 ```text
 WAITING
@@ -270,43 +262,45 @@ STARTING
 IN_GAME
 ```
 
-The server:
-
-1. validates host authority
-2. verifies player count
-3. verifies readiness
-4. generates a match ID
-5. creates the authoritative game instance
-6. assigns spawn locations
-7. transitions players into the Phaser arena
-
 ---
 
-# 🎮 Phaser Arena
+# 🎮 Arena
 
-Current world dimensions:
+Current arena size:
 
 ```text
 1600 × 900
 ```
 
-The arena uses original procedural graphics rather than external copyrighted game assets.
+Movement speed:
 
-It includes:
+```text
+260 units / second
+```
 
-* dark arena styling
-* floor/grid treatment
-* visible boundaries
-* player markers
-* player names
-* local-player identification
-* bounded camera
+Server simulation:
+
+```text
+20 Hz
+```
+
+Snapshot broadcasting:
+
+```text
+10 Hz
+```
+
+Remote interpolation delay:
+
+```text
+120 ms
+```
 
 ---
 
 # 🕹️ Controls
 
-Move with:
+Movement:
 
 ```text
 W A S D
@@ -318,273 +312,411 @@ or:
 Arrow Keys
 ```
 
-Diagonal movement is normalized.
-
-Current authoritative movement speed:
+Combat:
 
 ```text
-260 units / second
+Mouse      → Aim
+Left Click → Fire
 ```
 
-The client cannot choose its own movement speed.
+The client sends intent only.
+
+The server owns movement, projectile creation, collision, and damage.
 
 ---
 
-# 🖥️ Server Simulation
+# 🔫 Basic Blaster
 
-Gameplay uses a fixed authoritative simulation loop.
+Current combat configuration:
 
 ```text
-Simulation Rate: 20 Hz
-Snapshot Rate:   10 Hz
+Maximum Health:      100
+Projectile Damage:    25
+Projectile Speed:    800 units/sec
+Fire Cooldown:       300 ms
+Projectile Lifetime:   2 seconds
+Respawn Delay:         3 seconds
 ```
 
-The simulation is independent of browser frame rate.
+These values are enforced by the server.
 
-One game-server process can manage multiple active game instances through the shared simulation architecture.
-
-The simulation loop does not perform PostgreSQL or Redis writes every tick.
+Clients cannot modify them.
 
 ---
 
-# 📡 Movement Protocol
+# 🎯 Aiming
 
-Clients send **movement intent**, not positions.
+Mouse position determines aim intent.
 
-Conceptually:
+The client sends a normalized direction vector.
 
-```text
-{
-  up,
-  down,
-  left,
-  right,
-  sequence
-}
-```
+The server validates the direction before accepting it.
 
-The server determines:
+Clients cannot set:
 
-```text
-position
-speed
-movement delta
-boundary enforcement
-processed input sequence
-```
-
-Clients cannot submit authoritative coordinates.
+* projectile spawn position
+* projectile speed
+* projectile damage
+* projectile ID
+* hit target
+* hit result
 
 ---
 
-# ⚡ Client-Side Prediction
+# 💥 Projectiles
 
-Waiting for every server snapshot before moving the local character would make controls feel delayed.
+Projectiles are created exclusively by the authoritative server.
 
-The local Phaser client therefore predicts movement immediately.
+Each projectile has server-owned state such as:
+
+* ID
+* owner
+* position
+* direction
+* speed
+* damage
+* lifetime
+
+Projectiles disappear when they:
+
+* hit a player
+* leave arena bounds
+* expire
+* are removed with their owner on explicit departure
+
+---
+
+# 🎯 Collision Detection
+
+Projectile collision uses **swept collision detection**.
+
+This checks projectile travel across a simulation step rather than only checking its final position.
+
+This reduces tunneling for fast-moving projectiles.
+
+When several targets are intersected, the nearest valid target is selected.
+
+A projectile can damage only one player.
+
+Players cannot damage themselves with their own projectile.
+
+---
+
+# ❤️ Health & Damage
+
+Each player begins with:
 
 ```text
-Keyboard Input
-     │
-     ├──────────────► Local Prediction
-     │
-     ▼
-Game Server
-     │
-     ▼
-Authoritative Position
+100 / 100 HP
 ```
 
-The server remains authoritative.
-
----
-
-# 🔄 Server Reconciliation
-
-Movement inputs use increasing sequence numbers.
-
-The server acknowledges processed inputs through authoritative snapshots.
-
-When the client receives a snapshot:
-
-1. use authoritative server position
-2. remove acknowledged inputs
-3. replay pending inputs
-4. correct prediction error
-
-This allows responsive controls without trusting the browser as the source of truth.
-
----
-
-# 🌐 Remote Player Interpolation
-
-Remote players are rendered using buffered interpolation rather than directly snapping to each incoming position.
-
-Current interpolation delay:
+Each Basic Blaster hit deals:
 
 ```text
-120 ms
+25 damage
 ```
 
-Conceptually:
+Example:
 
 ```text
-Snapshot A             Snapshot B
-    ●----------------------●
-              ↑
-       interpolated
-          position
+100 → 75 → 50 → 25 → 0
 ```
 
-This produces smoother remote movement despite snapshots arriving at 10 Hz.
+Health is server-controlled and cannot fall below zero.
+
+Clients only render authoritative health values.
 
 ---
 
-# 📷 Camera
+# ☠️ Eliminations
 
-The Phaser camera:
+When health reaches zero:
 
-* follows the local player
-* moves smoothly
-* respects world boundaries
-* responds to viewport resizing
+* player becomes dead
+* movement stops
+* firing is disabled
+* elimination counter updates
+* death counter updates
+* respawn timer begins
 
-Gameplay coordinates remain based on the logical world rather than browser dimensions.
+Dead players cannot continue controlling gameplay.
+
+Duplicate elimination processing is prevented.
 
 ---
 
-# 📊 Arena HUD
+# 🔄 Respawning
 
-The arena interface currently displays information such as:
+Respawn occurs after:
 
-* room/match identity
-* player count
+```text
+3 seconds
+```
+
+On respawn:
+
+* full health is restored
+* player becomes alive
+* old movement input is cleared
+* stale combat input is removed
+* a new safe spawn position is selected
+
+---
+
+# 📍 Respawn Spawn Selection
+
+Respawn placement evaluates **nine deterministic candidate positions**.
+
+The server chooses the safest available candidate based on distance from living players.
+
+This reduces immediate spawn overlap without introducing a full spawn-protection system.
+
+Spawn protection is not yet implemented.
+
+---
+
+# 🔌 Combat Networking
+
+Clients send typed gameplay intent.
+
+Examples:
+
+```text
+game:aim
+game:fire
+```
+
+Authoritative state is distributed through synchronized game snapshots.
+
+Snapshots include safe combat information such as:
+
+* health
+* alive state
+* aim direction
+* eliminations
+* deaths
+* projectile positions
+
+Sensitive identity/session data are never included.
+
+---
+
+# ⚡ Client Prediction
+
+Movement remains client-predicted for responsiveness.
+
+Combat does **not** use client-side hit prediction.
+
+```text
+Movement → predicted locally
+Shot intent → server validated
+Projectile → server authoritative
+Hit → server authoritative
+Damage → server authoritative
+```
+
+This avoids disagreement about combat results.
+
+---
+
+# 🌐 Projectile Rendering
+
+Authoritative projectile state comes from the server.
+
+Clients visually advance projectiles between snapshots to avoid visible 10 Hz stepping.
+
+Rendering remains visual only.
+
+The authoritative projectile remains server-owned.
+
+---
+
+# 🎨 Combat Presentation
+
+The Phaser arena now includes:
+
+* aim barrels
+* glowing projectiles
+* health bars
+* hit flashes
+* dead-state indicators
+* respawn indicators
+* player labels
+* local-player identification
+
+The combat HUD shows:
+
+* health
+* alive/respawning state
+* eliminations
+* deaths
 * connection state
-* movement controls
+* match identity
 * Leave Arena
 
-A development network diagnostics overlay is available but disabled by default.
-
-Diagnostics can expose useful non-sensitive information such as:
-
-* socket state
-* server tick
-* snapshot activity
-* latency
-* predicted position
-* authoritative position
-
 ---
 
-# 🔄 Disconnect & Recovery
+# 🔄 Disconnect & Refresh Behavior
 
-Temporary connection loss uses a:
+Temporary disconnects receive a:
 
 ```text
-5-second reconnect grace period
+5-second grace period
 ```
 
-During the grace period the disconnected player's movement is frozen.
+During this time:
 
-If the player reconnects in time:
+* player is frozen
+* player cannot shoot
+* player remains damageable
 
-* identity is restored
-* current game membership is restored
-* authoritative position is retained
-* Phaser is reconstructed safely
+This prevents disconnecting from becoming an invulnerability exploit.
 
-Refreshing `/play` therefore does not automatically respawn the player.
+Refreshing preserves:
+
+* position
+* health
+* alive/dead state
+* respawn countdown
+* fire cooldown
+* eliminations
+* deaths
+* game membership
+
+Refreshing does not restore full health or force a new spawn.
 
 ---
 
 # 🖥️ Multiple Tabs
 
-Only the newest active game/lobby controller may control a player.
+Only the newest active game controller may control the player.
 
-Older connections stop controlling gameplay.
-
-This prevents multiple browser tabs from simultaneously submitting movement for the same authenticated player.
+Older tabs cannot continue submitting authoritative gameplay input.
 
 ---
 
 # 🛡️ Anti-Cheat Foundation
 
-The authoritative architecture prevents clients from directly:
+Clients cannot directly:
 
-* submitting positions
-* choosing movement speed
-* moving another player
-* spoofing player identity
-* controlling a game they do not belong to
-* moving before the match begins
-* continuing control after removal
-* manipulating the server simulation tick
+* set health
+* set damage
+* claim hits
+* choose projectile positions
+* change projectile speed
+* change projectile damage
+* create projectile IDs
+* bypass fire cooldown
+* move while dead
+* shoot while dead
+* control other players
+* fake eliminations
+* force respawns
+* spoof identity
 
-This provides an anti-cheat foundation rather than a complete anti-cheat system.
+The server is the source of truth for combat outcomes.
+
+---
+
+# ⚙️ Performance
+
+Combat runs inside the existing shared game simulation loop.
+
+The implementation avoids:
+
+* per-projectile timers
+* PostgreSQL queries per tick
+* Redis writes per projectile
+* client-authoritative collisions
+* unnecessary network events
+
+Simulation:
+
+```text
+20 ticks/sec
+```
+
+Snapshots:
+
+```text
+10/sec
+```
 
 ---
 
 # 🧪 Testing
 
-Phase 4 verification:
+Phase 5 verification:
 
 ```text
-Backend tests:      80
-Networking tests:    6
------------------------
-Total:              86
+Backend Tests:      114
+Shared Tests:        12
+------------------------
+Total:              126
 
-Failed:              0
+Failed:               0
 ```
 
-All previous applicable tests remain covered.
+All previous applicable test coverage remains preserved.
 
-Testing includes:
+Combat test coverage includes:
 
-* room-to-game transition
-* authoritative spawning
-* movement processing
-* movement speed
-* diagonal normalization
-* world boundaries
-* malformed input
-* unauthorized input
-* sequence processing
-* snapshots
-* player leaving
-* reconnect grace
+* aiming
+* firing
+* cooldown enforcement
+* projectile creation
+* projectile lifetime
+* projectile bounds
+* swept collision
+* self-hit prevention
+* authoritative damage
+* health clamping
+* elimination
+* death restrictions
+* respawning
+* safe respawn selection
 * refresh recovery
-* controller ownership
-* game cleanup
-* prediction
-* reconciliation
-* interpolation
+* disconnect behavior
+* projectile cleanup
+* secure snapshot payloads
 
 ---
 
-# 🌐 Multiplayer Browser Verification
+# 🌐 Browser Verification
 
-Two authenticated browser sessions were used for end-to-end multiplayer verification.
+Two authenticated browser sessions were used for live combat verification.
 
 Verified:
 
 * room creation
-* second player joining
-* ready states
+* joining
 * match start
-* both clients entering Phaser
-* Player A movement visible to Player B
-* Player B movement visible to Player A
-* equal cardinal/diagonal speed
-* world boundaries
-* refresh recovery
-* leaving the arena
-* mobile/tablet behavior
+* movement
+* aiming
+* firing
+* remote projectile rendering
+* health loss
+* elimination
+* respawn countdown
+* respawning
+* elimination/death counters
+* cooldown enforcement
+* self-hit prevention
+* damaged-state refresh
+* dead-state refresh
+* projectile cleanup
+* responsive layout
 * browser console health
 
 ---
 
 # ⚙️ Local Development
+
+On the current machine, first configure the working Node runtime:
+
+```bash
+export PATH=/Users/lakshithlokesh/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH
+```
 
 Start infrastructure:
 
@@ -592,7 +724,7 @@ Start infrastructure:
 docker compose up -d
 ```
 
-Apply migrations:
+Apply database migrations:
 
 ```bash
 npm run db:migrate -w server
@@ -607,6 +739,8 @@ npm run dev:server
 In another terminal:
 
 ```bash
+export PATH=/Users/lakshithlokesh/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH
+
 npm run dev:frontend
 ```
 
@@ -628,50 +762,39 @@ Multiplayer:
 http://localhost:3000/play
 ```
 
-### Current-machine Node runtime
-
-If required on the current development machine:
-
-```bash
-export PATH=/Users/lakshithlokesh/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH
-```
-
 ---
 
 # ⚠️ Current Limitations
 
-Current live simulation supports a **single game-server process**.
+Current gameplay supports one authoritative game-server process.
+
+Active game/combat state is lost if the game server restarts.
 
 Not yet implemented:
 
-* combat
-* weapons
-* projectiles
-* health
-* damage
-* eliminations
-* respawning
-* scoring
+* spawn protection
+* touch controls
+* lag compensation / rewind
+* persistent match statistics
 * match timer
-* win conditions
-* durable match recovery
+* final win conditions
+* persistent match results
+* match history
 * matchmaking
-* persistent statistics
-* competitive leaderboard data
+* leaderboards
 * spectators
 * AI bots
-* touch movement controls
+* durable game recovery
 * multi-server live simulation
+* production deployment
 
-Packet loss or significant latency can still result in visible reconciliation corrections.
-
-Existing Prisma dependency findings remain documented.
+Existing Prisma dependency advisories remain documented.
 
 ---
 
 # 🗺️ Roadmap
 
-### Phase 1 — Foundation & Architecture ✅
+## Phase 1 — Foundation & Architecture ✅
 
 * Next.js
 * Express
@@ -681,69 +804,68 @@ Existing Prisma dependency findings remain documented.
 * Redis
 * Docker
 
-### Phase 2 — Authentication & Profiles ✅
+## Phase 2 — Authentication & Profiles ✅
 
-* accounts
-* profiles
-* secure sessions
-* protected routes
-* authenticated sockets
+* secure accounts
+* player profiles
+* PostgreSQL sessions
+* authenticated Socket.IO
 
-### Phase 3 — Multiplayer Rooms ✅
+## Phase 3 — Multiplayer Rooms ✅
 
 * public/private rooms
 * room codes
-* Redis state
-* host system
-* readiness
+* ready system
+* host controls
 * realtime lobby
-* reconnect grace
+* Redis room state
 
-### Phase 4 — Real-Time Arena ✅
+## Phase 4 — Real-Time Arena ✅
 
 * Phaser arena
-* server-authoritative simulation
 * spawning
-* movement
+* authoritative movement
 * prediction
 * reconciliation
 * interpolation
-* snapshots
-* camera
 * refresh recovery
 
-### Phase 5 — Combat
+## Phase 5 — Combat ✅
 
-Planned:
-
-* player health
 * aiming
-* attacks
+* Basic Blaster
 * projectiles
-* server-authoritative damage
+* collision detection
+* health
+* damage
 * eliminations
 * respawning
 * combat HUD
+* combat anti-cheat foundation
 
-### Phase 6 — Match System
+## Phase 6 — Match System
 
 Planned:
 
 * match timer
-* scoring
+* live score
 * win conditions
-* results
-* persistent match records
+* end-of-match state
+* results screen
+* PostgreSQL match records
+* match participants
+* persistent eliminations/deaths
+* rematch / return-to-lobby flow
 
-### Phase 7 — Matchmaking
+## Phase 7 — Matchmaking
 
 Planned:
 
 * Redis matchmaking queue
-* automated matching
+* automatic room assignment
 * rating foundations
 
-### Phase 8 — Competitive Systems
+## Phase 8 — Competitive Systems
 
 Planned:
 
@@ -752,18 +874,17 @@ Planned:
 * leaderboards
 * performance analytics
 
-### Phase 9 — Advanced Multiplayer
+## Phase 9 — Advanced Multiplayer
 
 Planned:
 
-* durable reconnection
+* durable reconnect
 * spectators
 * AI bots
-* presence improvements
 * network resilience
 * multi-instance foundations
 
-### Phase 10 — Production Deployment
+## Phase 10 — Production Deployment
 
 Target:
 
@@ -780,36 +901,38 @@ Redis          → Upstash Redis
 
 This project demonstrates practical experience with:
 
-* real-time multiplayer networking
-* authoritative game-server architecture
+* authoritative multiplayer networking
 * Socket.IO
 * server simulation loops
 * state snapshots
-* client-side prediction
-* server reconciliation
-* remote interpolation
+* movement prediction
+* reconciliation
+* interpolation
+* projectile simulation
+* continuous collision detection
+* combat state machines
+* respawn logic
+* anti-cheat architecture
 * Phaser
 * full-stack TypeScript
-* Redis
 * PostgreSQL
 * Prisma
+* Redis
 * secure authentication
-* concurrency
 * Docker
-* anti-cheat architecture
 
 ---
 
 # 📊 Current Status
 
 ```text
-Phase 4/10
+Phase 5/10
 
 Foundation & Architecture     ██████████ 100%
 Authentication & Profiles     ██████████ 100%
 Multiplayer Rooms             ██████████ 100%
 Real-Time Arena               ██████████ 100%
-Combat                        ░░░░░░░░░░   0%
+Combat                        ██████████ 100%
 Match System                  ░░░░░░░░░░   0%
 Matchmaking                   ░░░░░░░░░░   0%
 Competitive Systems           ░░░░░░░░░░   0%

@@ -7,7 +7,8 @@ import { readSessionCookie } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import { configureLobby } from "./rooms.js";
 import type { RoomService } from "../services/rooms.js";
-export function attachSocketServer(httpServer: HttpServer, config: Environment, auth: AuthService, rooms?: RoomService, graceMs?: number) {
+import type { MatchService } from "../services/matches.js";
+export function attachSocketServer(httpServer: HttpServer, config: Environment, auth: AuthService, rooms?: RoomService, graceMs?: number, matches?: MatchService) {
  const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(httpServer, {
   cors: { origin: config.frontendUrl, credentials: true, methods: ["GET", "POST"] },
   maxHttpBufferSize: 16_384,
@@ -43,7 +44,8 @@ export function attachSocketServer(httpServer: HttpServer, config: Environment, 
   });
   socket.on("disconnect", reason => { clearInterval(interval); logger.info("socket.disconnected", { socketId: socket.id, reason }); });
  });
- const closeLobby = configureLobby(io, auth, rooms, graceMs, config.gameTickRate);
- httpServer.once("close", () => { void closeLobby().catch(() => logger.warn("lobby.shutdown_cleanup_failed")); });
- return io;
+ const closeLobby = configureLobby(io, auth, rooms, graceMs, config.gameTickRate, matches, config.matchDurationSeconds);
+ let cleanup: Promise<void> = Promise.resolve();
+ httpServer.once("close", () => { cleanup = closeLobby().catch(() => logger.warn("lobby.shutdown_cleanup_failed")); });
+ return Object.assign(io, { waitForCleanup: () => cleanup });
 }

@@ -276,3 +276,32 @@ test("leaving combat removes owned projectiles from remaining clients",async()=>
  const snapshot=await launch(),a=users[0]!.client,b=users[1]!.client;const created=nextGame(b,s=>s.projectiles.length>0);a.emit("game:fire",{...shot(snapshot),aimX:0,aimY:-1});await created;
  unwrap(await a.timeout(3000).emitWithAck("game:leave",{}));const remaining=(await game(b))!;assert.equal(remaining.players.length,1);assert.equal(remaining.projectiles.length,0);
 });
+
+test('finished room retains results until every member returns, then rematches with fresh identity',async()=>{
+ const first=await launch();await rooms.finish(first.roomId,first.gameId);
+ assert.equal((await current())!.status,'FINISHED');
+ assert.equal(code(await users[2]!.client.timeout(3000).emitWithAck('room:return',{})),'NOT_MEMBER');
+ const partial=unwrap(await users[0]!.client.timeout(3000).emitWithAck('room:return',{}));assert.equal(partial.status,'FINISHED');
+ const reset=unwrap(await users[1]!.client.timeout(3000).emitWithAck('room:return',{}));assert.equal(reset.status,'WAITING');assert.equal(reset.gameId,undefined);assert.ok(reset.players.every(p=>!p.ready));assert.equal(await game(),null);
+ for(const user of users.slice(0,2))unwrap(await user.client.timeout(3000).emitWithAck('room:set-ready',{ready:true}));
+ unwrap(await users[0]!.client.timeout(3000).emitWithAck('room:start',{}));await until(async()=> (await current())!.status==='IN_GAME');
+ const second=(await game())!;assert.notEqual(second.gameId,first.gameId);assert.ok(second.players.every(p=>p.score===0&&p.deaths===0&&p.health===100));assert.equal(await database.db.match.count({where:{id:{in:[first.gameId,second.gameId]}}}),2);
+});
+test('finished retention resets at two minutes without client return',async()=>{
+ let clock=1000;const isolated=createRoomService(()=>redis.client,{key:`arena:test:lobby:${randomUUID()}`,heartbeatMs:0,startDelayMs:0,now:()=>clock});
+ try{const a={playerProfileId:'a',username:'a',displayName:'A'},b={playerProfileId:'b',username:'b',displayName:'B'};const r=await isolated.create(a,{name:'Retention arena',visibility:'PUBLIC',maxPlayers:2});await isolated.join(b,r.id);await isolated.ready('a',true);await isolated.ready('b',true);await isolated.start('a');const active=(await isolated.sync('a'))!;await isolated.finish(r.id,active.gameId!);clock+=119999;assert.equal((await isolated.sync('a'))!.status,'FINISHED');clock++;const reset=(await isolated.sync('a'))!;assert.equal(reset.status,'WAITING');assert.equal(reset.gameId,undefined);assert.ok(reset.players.every(p=>!p.ready));}finally{await isolated.close();}
+});
+test('deadline during disconnect grace persists both players and reconnect restores immutable results',async()=>{
+ for(const client of clients)client.disconnect();await server.close();
+ key=`arena:test:lobby:${randomUUID()}`;rooms=createRoomService(()=>redis.client,{key,heartbeatMs:0,startDelayMs:20});server=await testServer(database.db,rooms,1500,5);
+ for(const user of users)user.client=await connect(user.cookie);
+ const first=await launch();const a=users[0]!.client,b=users[1]!.client;
+ for(let i=1;i<=4;i++){a.emit('game:fire',shot(first,i));await sleep(320);}
+ await nextGame(a,s=>s.players[0]!.score===1);
+ const before=(await game())!;b.io.engine!.close();const active=await connect(users[1]!.cookie);const recovered=(await game(active))!;assert.equal(recovered.gameId,first.gameId);assert.equal(recovered.players[0]!.score,1);assert.ok(recovered.match.remainingMs<=before.match.remainingMs);
+ await nextGame(a,s=>s.match.remainingMs<700,5000);active.io.engine!.close();
+ const finished=await nextGame(a,s=>s.match.status==='FINISHED'&&s.match.persistence==='SAVED');assert.equal(finished.match.result!.standings.length,2);assert.equal(finished.match.result!.winnerPlayerProfileId,users[0]!.id);
+ const replacement=await connect(users[1]!.cookie);const restored=(await game(replacement))!;assert.deepEqual(restored.match.result,finished.match.result);assert.equal(restored.match.remainingMs,0);
+ a.emit('game:fire',shot(first,99));a.emit('game:input',movement(first.gameId,99));await sleep(100);const frozen=(await game())!;assert.deepEqual(frozen.match.result,finished.match.result);assert.equal(frozen.projectiles.length,0);assert.deepEqual(frozen.players.map(p=>[p.x,p.y,p.health,p.score]),finished.players.map(p=>[p.x,p.y,p.health,p.score]));
+ assert.deepEqual(await server.matches.detail(users[1]!.id,first.gameId),finished.match.result);
+});

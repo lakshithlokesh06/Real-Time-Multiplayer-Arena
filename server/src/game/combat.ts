@@ -17,9 +17,12 @@ export function respawnPosition(players: Iterable<PlayerRuntime>, selfId: string
  return best;
 }
 export class CombatSimulation {
+ private active = true;
+ stop() { this.active=false; this.projectiles.clear(); for(const p of this.players.values()){p.pending=undefined;p.pendingFire=undefined;} }
  readonly projectiles = new Map<string, Projectile>();
  constructor(private readonly players: Map<string, PlayerRuntime>, readonly tickRate: number, readonly config: Readonly<CombatConfig> = COMBAT) {}
  intent(id: string, intent: CombatIntent, fire: boolean, tick: number) {
+  if(!this.active)return;
   const player = this.players.get(id);
   if (!player?.state.connected) throw new RoomError("NOT_MEMBER", "Combat control is unavailable for this player life.");
   // Normal in-flight packets can arrive after elimination or across a respawn.
@@ -32,6 +35,7 @@ export class CombatSimulation {
   if (fire && tick + 1 >= player.nextShotTick) player.pendingFire = normalized;
  }
  respawn(tick: number) {
+  if(!this.active)return;
   for (const player of this.players.values()) {
    if (player.state.alive) continue;
    player.state.respawnInMs = Math.max(0, (player.respawnTick - tick) * 1000 / this.tickRate);
@@ -42,6 +46,7 @@ export class CombatSimulation {
   }
  }
  step(tick: number) {
+  if(!this.active)return;
   for (const [id, projectile] of this.projectiles) {
    if (tick >= projectile.expiresTick) { this.projectiles.delete(id); continue; }
    const x = projectile.x + projectile.directionX * projectile.speed / this.tickRate;
@@ -86,7 +91,7 @@ export class CombatSimulation {
   target.state.respawnInMs = (target.respawnTick - tick) * 1000 / this.tickRate;
   target.pending = undefined; target.pendingFire = undefined; target.state.lastSequence = target.received;
   const owner = this.players.get(projectile.ownerPlayerProfileId);
-  if (owner && owner !== target) owner.state.eliminations++;
+  if (owner && owner !== target) { owner.state.eliminations++; owner.state.score++; }
  }
  removeOwner(id: string) { for (const [key, projectile] of this.projectiles) if (projectile.ownerPlayerProfileId === id) this.projectiles.delete(key); }
  snapshot(): GameProjectile[] { return Array.from(this.projectiles.values(), p => ({ id: p.id, ownerPlayerProfileId: p.ownerPlayerProfileId, x: p.x, y: p.y, directionX: p.directionX, directionY: p.directionY })); }

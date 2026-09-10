@@ -25,3 +25,18 @@ button,input{font:inherit}button{cursor:pointer}button:disabled{opacity:.6;curso
 .combat-status div > span { font-size: .7rem; text-transform: uppercase; letter-spacing: .12em; color: #adc1ba; margin-bottom: .25rem; }
 .combat-status p { margin: 0; }
 .arena-canvas canvas { cursor: crosshair; }
+
+.match-clock { font-variant-numeric: tabular-nums; font-size: 1.4rem; font-weight: 750; }
+.final-seconds { color: #ffd58b; border-bottom: 2px solid currentColor; }
+.result-banner { padding: 2rem; margin: 2rem 0; border: 1px solid #748d4e; border-radius: 16px; background: linear-gradient(120deg,#203126,#101d24); }
+.result-banner > p { color: #c4f279; font-size: clamp(1.4rem,4vw,2.6rem); font-weight: 750; margin: 0 0 1rem; overflow-wrap: anywhere; }
+.standings-scroll { overflow-x: auto; border: 1px solid #344943; border-radius: 12px; margin: 1rem 0; }
+.standings { width: 100%; border-collapse: collapse; text-align: left; font-size: .9rem; }
+.standings caption { text-align: left; padding: 1rem; color: #aec0b6; }
+.standings th,.standings td { padding: .9rem; border-top: 1px solid #344943; }
+.standings tr[data-self="true"] { background: #1d3023; }
+.standings small { display: block; font-weight: normal; color: #b6c2ba; }
+.history-card { border: 1px solid #344943; border-radius: 12px; padding: 1.2rem; margin: 1rem 0; }
+.history-card summary { cursor: pointer; padding: .8rem 0; color: #c4f279; }
+.match-history { margin: 2rem 0; }
+@media(max-width:600px) { .result-banner { padding: 1.2rem; } .standings th,.standings td { padding: .6rem; } }

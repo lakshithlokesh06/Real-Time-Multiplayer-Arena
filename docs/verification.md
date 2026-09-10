@@ -1,131 +1,115 @@
-# Phase 5 verification — authoritative combat
+# Phase 6 verification — 2026-09-10
 
-Verified locally on 2026-09-10. README.md was not edited; its before/after SHA-1 is `b582b020f1eedcfe48b71f9742e978a66efd5874`. No commit, push, deployment, durable combat statistics, or Phase 6 work was performed.
+## Outcome
 
-## Exact automated results
+Implemented authoritative timed matches, scoring, deterministic standings, transactional PostgreSQL results, finished refresh/reconnect, room reset/rematch, history API/UI, dashboard latest match, and HUD timer/score. Phases 1–5 functionality remains covered by the original 126 tests. No Phase 7 work was started.
 
-| Check | Result |
-| --- | --- |
-| PostgreSQL 17 / Redis 7 | Docker Desktop started; both existing Compose services running |
-| Migration deployment | Existing migration present; no pending migrations |
-| Prisma validation | Passed |
-| Backend tests | **114 passed, 0 failed, 0 skipped**, 12,920.881541 ms |
-| Shared network/combat algorithms | **12 passed, 0 failed, 0 skipped**, 32.987167 ms |
-| Total | **126 passed** |
-| Frontend lint | Passed |
-| Server lint | Passed |
-| Frontend TypeScript | Passed |
-| Server TypeScript | Passed |
-| Frontend production build | Passed; Next.js generated all 10 pages |
-| Server production build | Passed |
-| Diff/whitespace check | Passed |
+## Automated verification
 
-All 86 Phase 4 tests remain. The prior safe-player projection test's explicit field allowlist was extended for the new safe combat fields; no existing case was removed or skipped. New coverage is 27 deterministic combat tests, seven authenticated socket integration tests, and six shared rendering/reconciliation tests.
+Final suite: **156 passed, 0 failed, 0 skipped** — **144 backend + 12 shared**. Added 30 tests: 18 deterministic lifecycle/ranking/retry/configuration tests, 8 persistence/history tests, 3 room/recovery tests, and 1 populated migration test. Existing combat tests additionally assert one point per elimination.
 
-### Coverage
+Coverage includes monotonic countdown/deadline and delayed scheduler wake, finish exactly once, frozen movement/fire/aim/health/respawn/score, cleared projectiles, winner/tie ordering, retained departed/disconnected statistics, immutable result snapshots, stale metadata rejection, fresh instances, bounded retries, participant uniqueness, concurrent idempotent finish, rollback, historical identity retention after profile deletion, authenticated bounded/safely projected history, detail access, completion ordering, all-member return, timed retention, new database identities for rematches, and deadline completion during reconnect grace with saved results restored.
 
-The deterministic combat tests cover valid server-generated shots; UUID/muzzle/speed/damage/lifetime ownership; aim normalization; malformed, nonfinite, zero, excessive and forged fields; nonmember/wrong-game access; dead/disconnected control; exact cooldown boundary; spam and stale sequences; fixed-step movement; lifetime expiry; world exit; swept tunneling; moving-target crossings; muzzle-overlap hits; owner immunity; nearest non-piercing hits; four-hit elimination; health clamping; duplicate elimination prevention; dead control clearing; exact respawn deadline; full health/control restoration; old-life input rejection; deterministic farthest spawn selection; grace damageability; queued-fire freeze; reconnect preservation of death state/deadline; owned-projectile leave cleanup; safe snapshot copies; and bounded combat in multiple game instances without storage dependencies.
+A full run exposed a shutdown race between pending result transactions and test database cleanup. Shutdown now awaits lifecycle jobs before releasing database/Redis resources; room listeners cannot recreate games while closing. The final full suite passed with this fix. Initial infrastructure failure was due to stopped Docker services; they were started and healthy before migration and successful integration runs. Two new recovery-test observation issues (isolated Redis key and too-short observation timeout) were corrected before the passing run.
 
-Socket tests use real authenticated connections and isolated PostgreSQL/Redis fixtures. They additionally verify unauthenticated combat handshake rejection, wrong-game/forged damage rejection, outsider/expired-session rejection, actual projectile and health synchronization, refresh with reduced health, event flood limits, an old registered server handler after tab replacement, and leave/projectile cleanup. Existing room/transport/logout/host-transfer tests remain passing.
+`npm run lint`, `npm run typecheck`, `npm run db:validate`, frontend production build, and server production build passed. `git diff --check` passed. No dependencies were added. Browser automation is optional tooling already available on this machine.
 
-The six added pure shared cases cover projectile visual advancement and endpoint clamping, segment geometry edge cases, dead prediction clearing, old-life pending-input removal, and snapping remote interpolation across respawn instead of sweeping across the map. They exercise the production functions shared with the frontend.
+## Migration
 
-Cooldown, lifetime, collision and respawn tests use explicit simulation ticks; none depend on sleeping to reach a combat deadline. Database/socket tests require TEST_DATABASE_URL ending in `_test` and TEST_REDIS_URL database `/15`, use randomly generated schemas/keys, and never FLUSHDB or delete unrelated accounts. The one loop has no database or Redis dependency per projectile/tick. This is a structural/unit verification, not a production load benchmark.
+Applied `server/prisma/migrations/20260910040000_match_results/migration.sql` with Prisma migrate deploy to the existing development database. It adds only match enum/tables/indexes/foreign keys; it does not reset or alter account/session columns. Before/after full account-table snapshots matched (the development database contained zero User, PlayerProfile, and Session rows). A separate isolated upgrade test seeds all three old tables, applies the new migration, and verifies every field is preserved. Integration tests also deploy both migrations into fresh random schemas of the dedicated `_test` database. Redis tests use random keys in database 15 and never flush shared data.
 
-## Browser verification
+## Browser QA
 
-The repeatable `scripts/verify-combat.mjs` uses two isolated authenticated Chrome contexts and disposable accounts. It verifies create/join/ready/start, mouse aim, a quick click, authoritative projectile arrival on the other client, 25-point damage, repeated-hit elimination, health/counters, dead movement/fire suppression, visible respawn countdown, refresh while damaged, refresh while dead without resetting the countdown, full-health respawn, resumed movement/fire, and live eliminations/deaths. It also checks observed shot spacing against cooldown, no self-damage, React debug-button click isolation, leaving while an owned projectile is active, player/projectile removal, and tablet/mobile HUD overflow. Expected unauthenticated 401s during initial session lookup are excluded from significant console-error assertions; page errors are always asserted absent.
+Ran `scripts/verify-matches.mjs` with two independently authenticated Chrome contexts and `MATCH_DURATION_SECONDS=15`:
 
-The final combat scenario passed with 134 snapshots collected in each context, observed shot ticks [44,94,102,108,114], no arena error alert on elimination, and no page errors or significant console errors. The alert check is scoped to the arena so Next.js’s separate route-announcement element is not treated as a gameplay error. Screenshots of the eliminated state and the mobile HUD were visually reviewed. The original `scripts/verify-arena.mjs` was rerun and passed: 143/145 snapshots, cardinal speed 260 and diagonal speed approximately 260.00000000000045 units/second, bounded movement, refresh position recovery, canvas lifecycle, responsive layout, and zero page/significant console errors.
+- Create/join/ready/start, visible authoritative timer, actual mouse aim/fire, one elimination/point and victim death.
+- Both clients reach zero and receive identical winner/placement/standings; projectiles are empty and Phaser is destroyed.
+- SAVED status, finished-client refresh restores the same match/results, no duplicate match records.
+- Return both to lobby; readiness resets; ready/start again creates a new identity with full health and zero score/eliminations/deaths.
+- Second timer finishes with a deterministic tied result; history includes both matches with the exact first result.
+- PostgreSQL contains exactly two completed Match rows and four participant rows for the two launches.
+- Results at desktop, 768 px tablet, and 390 px mobile; mobile history; no document overflow. Desktop/mobile screenshots were visually inspected. Narrow standings tables scroll inside their container.
+- 311/309 observed snapshots; no page errors or significant console errors.
 
-Browser work found and corrected two issues before final verification:
+Artifacts were written outside the repository to a temporary `arena-browser-*` directory. The script deletes only its generated match IDs and unique fixture accounts. No screenshots, browser profiles, fixture secrets, or temporary logs are committed. The short duration was a process override, not an edit to real environment files. Browser verification preceded the subsequent shutdown-only server fix and the singular “1 point” wording correction; final static/build/integration checks cover those changes.
 
-- A quick click could start and end between Phaser frames without producing a shot. The initial shot now dispatches on canvas pointer-down; held repeat remains cooldown-controlled.
-- Legitimate in-flight movement could arrive just after elimination and display a misleading control error. Dead/old-life packets now have no gameplay effect and produce no expected-lifecycle error. Real authorization/validation errors remain visible. The combat browser script asserts no alert on the eliminated player's HUD.
+## Exact local commands
 
-Both scripts create only uniquely named local test accounts and delete those exact accounts on completion/failure. They save screenshots in a temporary directory printed with their result. They read public socket snapshots and rendered UI, with no mutable debug authority exposed on `window`. Browser targeting uses the bounded camera transform; actual damage, health, projectiles and counters come from server snapshots. This is local Chrome verification, not a hostile-network, WAN-latency, mobile-touch gameplay, or production benchmark.
-
-## Behavior and limitations
-
-Basic Blaster: 100 maximum health, 25 damage, 800 units/second projectile speed, radius 5, 300 ms cooldown, 2,000 ms lifetime, 3,000 ms respawn, and a bounded 26-unit muzzle offset. These defaults are centralized in `COMBAT`; the existing arena remains 1600×900 with 20 Hz simulation and 10 Hz snapshots. There is no ammunition, reload, or spawn protection.
-
-The server owns projectile IDs/positions/velocity/damage, swept collisions, health, elimination and respawn. Intents contain only game/life identity, monotonic sequence, and bounded aim direction. Movement carries the current life generation too. Initial-life packets may omit life for the preserved Phase 4 contract; post-respawn control requires the new generation. Stale, duplicate, unauthorized and excessive inputs cannot grant extra shots or control other players.
-
-Swept segment-vs-circle collision uses relative target motion and chooses one nearest living target. A short muzzle sweep also handles overlapping opponents. Own shots cannot hit their owner; already-dead targets cannot be re-eliminated. Fired shots survive the shooter's death or temporary disconnect, but explicit leave/grace expiry removes owned projectiles. Disconnected players remain frozen and damageable during the five-second grace. Refresh restores health, position, alive/dead state, countdown, cooldown and live counters. Respawn uses the farthest of nine safe fixed candidates and clears old control. No persistent statistics are written.
-
-Frontend projectiles are visually advanced for at most 100 ms between authoritative snapshots, then held if snapshots stop. Very brief close-range shots may occur entirely between snapshots and be represented by health/hit flash rather than a visible travelling bolt. Movement prediction remains active while firing; death clears it and respawn changes its generation. Combat hit prediction and lag compensation are deferred. The HUD gives textual health and respawn state; mobile/tablet layout works, but gameplay still requires mouse and keyboard.
-
-No final win condition, permanent score, match history, leaderboard, matchmaking, spectators, bots, player-player collision, obstacles, or production deployment was implemented. Combat state is lost on server restart. Existing Redis outage/reconnect and single-server boundaries remain; see architecture.md. The previously documented Prisma tooling dependency findings remain a known baseline; no dependency upgrade or fresh audit is claimed in this phase.
-
-## Local commands
-
-From the repository root, with the existing environment files configured:
+From the repository root, using Node >=22.12:
 
 ```sh
-docker compose up -d
+npm install
+docker compose up -d --wait
 npm run db:migrate -w server
-npm run db:validate
+npm run db:generate -w server
 npm run dev:server
 ```
 
-In a second terminal:
+In another terminal:
 
 ```sh
 npm run dev:frontend
 ```
 
-For a fresh checkout, install with `npm ci` and prepare `.env`, `server/.env`, and `frontend/.env.local` from the examples using matching local credentials. Do not overwrite existing environment files. The project requires Node ≥22.12; Node 24 was used.
+Open `http://localhost:3000`; the API defaults to port 4000. Existing ignored root/server/frontend environment files remain untouched. On a fresh checkout configure them from the corresponding `.env.example` files before starting Docker or the application. `MATCH_DURATION_SECONDS=180` is the default; valid range 5–3600.
 
-Exact verification commands:
+Verification:
 
 ```sh
-docker compose up -d --pull never
-npm run db:migrate -w server
-npm run db:validate
 npm test
 npm run lint
 npm run typecheck
+npm run db:validate
 npm run build
 git diff --check
-git diff --exit-code -- README.md
-shasum README.md
 ```
 
-The existing Homebrew Node installation on this machine has a missing shared library. Commands used this working runtime:
+Tests require the existing dedicated `TEST_DATABASE_URL` database ending `_test` and `TEST_REDIS_URL` database `/15`. On this machine the Homebrew Node binary has a missing shared library, so commands used:
 
 ```sh
 export PATH=/Users/lakshithlokesh/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH
 ```
 
-The browser commands used the available Playwright runtime and Chrome:
+For browser QA, stop the normal server first, then run a short server and the frontend:
+
+```sh
+MATCH_DURATION_SECONDS=15 npm run dev:server
+```
+
+In another terminal:
 
 ```sh
 export PLAYWRIGHT_MODULE=/Users/lakshithlokesh/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs
 export ARENA_BROWSER_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-node scripts/verify-combat.mjs
-node scripts/verify-arena.mjs
+node scripts/verify-matches.mjs
 ```
 
-Playwright is optional verification tooling, not a new application dependency. On another machine supply a Playwright module or make `playwright` resolvable, and optionally choose a Chrome executable. Do not run Prisma generation/builds during a live browser match: the existing server development watcher restarts on generated-file changes.
+Do not run Prisma generation/builds during a live development-server browser match because the watcher restarts. The verified browser run used `MATCH_DURATION_SECONDS=15 npm run start -w server` after building, avoiding watcher restarts. Restart normally afterward to restore the default timer.
 
-## Files changed
+## Files created and modified
 
 Created:
 
-- `server/src/game/combat.ts`, `server/src/game/player.ts`
-- `server/test/combat.test.ts`
-- `frontend/src/game/input.ts`
-- `frontend/src/game/rendering/players.ts`, `frontend/src/game/rendering/projectiles.ts`
-- `shared/test/combat.test.js`
-- `scripts/verify-combat.mjs`
+- `server/src/game/match.ts`, `server/src/services/matches.ts`, `server/src/services/match-finalization.ts`, `server/src/routes/matches.ts`
+- `server/prisma/migrations/20260910040000_match_results/migration.sql`
+- `server/test/match.test.ts`, `server/test/match-persistence.test.ts`, `server/test/migration.test.ts`
+- `frontend/src/app/matches/page.tsx`, `frontend/src/components/match-results.tsx`, `frontend/src/components/match-history.tsx`
+- `scripts/verify-matches.mjs`
 
 Modified:
 
-- `server/src/game/manager.ts`, `server/src/socket/rooms.ts`
-- `server/test/game.test.ts`, `server/test/rooms.test.ts`
-- `shared/index.d.ts`, `shared/game.js`, `shared/game.d.ts`, `shared/test/network.test.js`
-- `frontend/src/game/network.ts`, `frontend/src/game/scenes/arena-scene.ts`
-- `frontend/src/components/arena-hud.tsx`, `frontend/src/app/globals.css`, `frontend/src/app/layout.tsx`
-- `docs/architecture.md`, this verification record
+- `shared/index.d.ts`
+- `server/prisma/schema.prisma`, `server/.env.example`, `server/src/config/env.ts`
+- `server/src/app.ts`, `server/src/index.ts`, `server/src/socket/index.ts`, `server/src/socket/rooms.ts`, `server/src/services/rooms.ts`
+- `server/src/game/manager.ts`, `server/src/game/combat.ts`
+- `server/test/helpers.ts`, `server/test/rooms.test.ts`, `server/test/game.test.ts`, `server/test/combat.test.ts`
+- `frontend/src/game/network.ts`, `frontend/src/hooks/use-lobby.ts`
+- `frontend/src/components/arena-hud.tsx`, `frontend/src/components/multiplayer-lobby.tsx`, `frontend/src/components/navigation.tsx`, `frontend/src/components/player-dashboard.tsx`
+- `frontend/src/app/globals.css`, `frontend/src/app/layout.tsx`
+- `docs/architecture.md`, `docs/verification.md`
 
-README.md is unchanged. No database schema/migration or dependency changes were needed.
+## Limitations and Git verification
+
+Single-process authority remains deliberate. Active matches are not durably recoverable after server failure; unfinished records may remain and are excluded from history. Finalization retries three times, then retains immutable in-memory standings with a visible failed-save status. No durable retry queue/outbox exists. Redis outages delay return and retention cleanup. Under normal service availability, results reset after all current members return or 120–150 seconds. Match history returns at most 25 completed matches per request, without older-page navigation. No matchmaking, ratings, global leaderboards, bots, spectators, advanced modes, or deployment work was included.
+
+Starting Git state was clean `main`. Phase 6 did not edit, stage, or commit README.md; its precommit SHA-1 remained `b582b020f1eedcfe48b71f9742e978a66efd5874`. The remote contained one newer user-authored README-only commit, `9816c5d` (“Update README.md”). Synchronization preserves that upstream commit. Only explicitly enumerated Phase 6 files are staged, excluding environment files, generated outputs, artifacts, and README.md. The intended commit message is `Add match lifecycle scoring and persistent results`. Final commit/push hashes and synchronization status are reported in the completion message after Git operations, avoiding a self-referential commit hash in this document. No force push or automatic conflict resolution is authorized.

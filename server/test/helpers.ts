@@ -26,17 +26,19 @@ export async function testDatabase() {
  return { db, async close() { await db.$disconnect(); await pool.query(`DROP SCHEMA "${schema}" CASCADE`); await pool.end(); } };
 }
 import type { RoomService } from "../src/services/rooms.js";
-export async function testServer(db: Database, rooms?: RoomService, graceMs?: number) {
- const config = parseEnv({ NODE_ENV: "test" });
+import { createMatchService } from "../src/services/matches.js";
+export async function testServer(db: Database, rooms?: RoomService, graceMs?: number, durationSeconds=180) {
+ const config = parseEnv({ NODE_ENV: "test", MATCH_DURATION_SECONDS:String(durationSeconds) });
+ const matches=createMatchService(db,durationSeconds);
  const auth = createAuthService(db, config);
- const server = createServer(createApp(config, auth));
- const io = attachSocketServer(server, config, auth, rooms, graceMs);
+ const server = createServer(createApp(config, auth,undefined,matches));
+ const io = attachSocketServer(server, config, auth, rooms, graceMs, matches);
  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
  const address = server.address();
  if (!address || typeof address === "string") throw new Error("Test listener failed");
  const url = `http://127.0.0.1:${address.port}`;
  const request = (path: string, method = "GET", body?: unknown, cookie?: string, headers: Record<string,string> = {}) => fetch(url + path, { method, headers: { Origin: config.frontendUrl, "X-Arena-Request": "1", "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
- return { url, config, auth, io, request, close: () => new Promise<void>(resolve => io.close(() => resolve())) };
+ return { url, config, auth, io, matches, request, close: async () => { await new Promise<void>(resolve => io.close(() => resolve())); await io.waitForCleanup(); } };
 }
 export const registration = { email: "player@example.com", username: "player_one", displayName: "Player One", password: "a unique arena passphrase 42" };
 export function cookieFrom(response: Response) {

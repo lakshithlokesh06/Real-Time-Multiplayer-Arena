@@ -7,7 +7,9 @@ import { authRouter } from "./routes/auth.js";
 import { profileRouter } from "./routes/profile.js";
 import { requireTrustedMutation } from "./middleware/auth.js";
 import { errorHandler } from "./middleware/error-handler.js";
-export function createApp(config: Environment, auth: AuthService, redisStatus: () => string = () => "disabled") {
+import { matchesRouter } from "./routes/matches.js";
+import type { MatchService } from "./services/matches.js";
+export function createApp(config: Environment, auth: AuthService, redisStatus: () => string = () => "disabled", matches?: MatchService) {
  const app = express();
  app.disable("x-powered-by");
  app.set("trust proxy", config.trustProxyHops);
@@ -17,6 +19,7 @@ export function createApp(config: Environment, auth: AuthService, redisStatus: (
  app.use(express.json({ limit: "16kb" }));
  app.use("/api", healthRouter(config, redisStatus));
  app.use("/api/auth", authRouter(config, auth));
+ if (matches) app.use("/api/matches", matchesRouter(config,auth,matches));
  app.use("/api/profile", profileRouter(config, auth));
  app.use((_request, response) => { response.status(404).json({ error: "Not found" }); });
  app.use(errorHandler);

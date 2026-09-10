@@ -26,20 +26,22 @@ export function roomInput<T>(schema: z.ZodType<T>, input: unknown): T {
  return result.data;
 }
 export function safeRoom(room: StoredRoom): RoomState {
- return { ...(room.gameId ? { gameId: room.gameId } : {}), id: room.id, code: room.code, name: room.name, visibility: room.visibility, status: room.status, hostPlayerProfileId: room.hostPlayerProfileId, maxPlayers: room.maxPlayers, createdAt: room.createdAt, players: room.players.map(p => ({ playerProfileId: p.playerProfileId, username: p.username, displayName: p.displayName, ready: p.ready, connected: p.connected, isHost: p.isHost, joinedAt: p.joinedAt })) };
+ return { matchStartedAt: room.matchStartedAt, finishedAt: room.finishedAt, returnedPlayerProfileIds: room.returnedPlayerProfileIds, ...(room.gameId ? { gameId: room.gameId } : {}), id: room.id, code: room.code, name: room.name, visibility: room.visibility, status: room.status, hostPlayerProfileId: room.hostPlayerProfileId, maxPlayers: room.maxPlayers, createdAt: room.createdAt, players: room.players.map(p => ({ playerProfileId: p.playerProfileId, username: p.username, displayName: p.displayName, ready: p.ready, connected: p.connected, isHost: p.isHost, joinedAt: p.joinedAt })) };
 }
 export function publicRooms(snapshot: LobbySnapshot): PublicRoom[] {
  return Object.values(snapshot.rooms).filter(room => room.visibility === "PUBLIC" && room.status === "WAITING" && room.players.length < room.maxPlayers).map(room => ({ id: room.id, name: room.name, hostDisplayName: room.players.find(p => p.isHost)?.displayName ?? "Player", playerCount: room.players.length, maxPlayers: room.maxPlayers, status: room.status }));
 }
 const empty = (): LobbySnapshot => ({ rooms: {}, codes: {}, playerRooms: {} });
-type Options = { key?: string; startDelayMs?: number; ttlSeconds?: number; heartbeatMs?: number; codeGenerator?: () => string };
+type Options = { key?: string; startDelayMs?: number; ttlSeconds?: number; heartbeatMs?: number; codeGenerator?: () => string; now?: () => number };
 export function createRoomService(redis: () => RedisClient | undefined, options: Options = {}) {
+ const now=options.now ?? Date.now;
  const key = options.key ?? `arena:lobby:v1:${randomUUID()}`;
  const ttl = options.ttlSeconds ?? 120;
  const startDelay = options.startDelayMs ?? 2000;
  const codeGenerator = options.codeGenerator ?? generateRoomCode;
  let tail: Promise<unknown> = Promise.resolve();
  let closed = false;
+ let launcher: (room: RoomState) => Promise<string> = async () => new Date(now()).toISOString();
  let listener: (snapshot: LobbySnapshot, readyRoomId?: string) => Promise<void> = async () => {};
  const timers = new Set<ReturnType<typeof setTimeout>>();
  function enqueue<T>(action: () => Promise<T>): Promise<T> {
@@ -53,7 +55,12 @@ export function createRoomService(redis: () => RedisClient | undefined, options:
    try { const raw = await client.get(key); state = raw ? JSON.parse(raw) as LobbySnapshot : empty(); }
    catch { throw new RoomError("UNAVAILABLE", "The lobby is temporarily unavailable. Please try again."); }
    if (!guard()) throw new RoomError("UNAUTHENTICATED", "This lobby connection is no longer active.");
-   for (const room of Object.values(state.rooms)) if (room.status === "STARTING" && (room.launchEndsAt ?? 0) <= Date.now()) { room.status = "IN_GAME"; room.gameId = randomUUID(); delete room.launchEndsAt; }
+   for (const room of Object.values(state.rooms)) {
+    if (room.status === "STARTING" && (room.launchEndsAt ?? 0) <= now()) {
+     room.matchStartedAt = await launcher(safeRoom(room)); room.status = "IN_GAME"; delete room.launchEndsAt;
+    }
+    if (room.status === "FINISHED" && now()-Date.parse(room.finishedAt!) >= 120000) reset(room);
+   }
    const { result, readyRoomId } = action(state);
    // One atomic SET commits metadata, membership, codes, and readiness together.
    try { await client.set(key, JSON.stringify(state), { EX: ttl }); }
@@ -62,7 +69,7 @@ export function createRoomService(redis: () => RedisClient | undefined, options:
    return result;
   });
  }
- function reset(room: StoredRoom) { room.status = "WAITING"; delete room.launchEndsAt; for (const player of room.players) player.ready = false; }
+ function reset(room: StoredRoom) { room.status = "WAITING"; delete room.launchEndsAt; delete room.gameId; delete room.matchStartedAt; delete room.finishedAt; delete room.returnedPlayerProfileIds; for (const player of room.players) player.ready = false; }
  function current(state: LobbySnapshot, playerId: string) { const id = state.playerRooms[playerId]; return id ? state.rooms[id] : undefined; }
  function requireRoom(state: LobbySnapshot, id: string) { const room = current(state,id); if (!room) throw new RoomError("NOT_MEMBER", "Join a room first."); return room; }
  function waiting(room: StoredRoom) { if (room.status !== "WAITING") throw new RoomError("NOT_WAITING", "This room has already started."); }
@@ -73,12 +80,15 @@ export function createRoomService(redis: () => RedisClient | undefined, options:
   if (existing) throw new RoomError("ALREADY_IN_ROOM", "Leave your current room before joining another.");
   waiting(room);
   if (room.players.length >= room.maxPlayers) throw new RoomError("ROOM_FULL", "That room is full.");
-  room.players.push({ playerProfileId: identity.playerProfileId, username: identity.username, displayName: identity.displayName, ready: false, connected: true, isHost: room.hostPlayerProfileId === identity.playerProfileId, joinedAt: new Date().toISOString() });
+  room.players.push({ playerProfileId: identity.playerProfileId, username: identity.username, displayName: identity.displayName, ready: false, connected: true, isHost: room.hostPlayerProfileId === identity.playerProfileId, joinedAt: new Date(now()).toISOString() });
   state.playerRooms[identity.playerProfileId] = room.id;
   return safeRoom(room);
  }
  const heartbeat = options.heartbeatMs === 0 ? undefined : setInterval(() => { void execute(() => ({ result: null })).catch(() => logger.warn("lobby.heartbeat_failed")); }, options.heartbeatMs ?? 30_000).unref();
  return {
+  setLauncher(callback: typeof launcher) { launcher = callback; },
+  finish(roomId: string, gameId: string) { return execute(state => { const room=state.rooms[roomId]; if(room?.gameId===gameId && room.status==="IN_GAME") {room.status="FINISHED";room.finishedAt=new Date(now()).toISOString();room.returnedPlayerProfileIds=[];} return {result:null}; }); },
+  returnToLobby(playerId: string, guard?: () => boolean) { return execute(state => { const room=requireRoom(state,playerId); if(room.status!=="FINISHED") throw new RoomError("NOT_WAITING","Results are not ready."); const returned=room.returnedPlayerProfileIds ?? []; if(!returned.includes(playerId))returned.push(playerId);room.returnedPlayerProfileIds=returned; if(room.players.every(p=>returned.includes(p.playerProfileId)))reset(room);return {result:safeRoom(room)};},guard); },
   setListener(callback: typeof listener) { listener = callback; },
   connection(playerId: string, connected: boolean, guard?: () => boolean) {
    return execute(state => {
@@ -101,7 +111,7 @@ export function createRoomService(redis: () => RedisClient | undefined, options:
     let code = "";
     for (let attempts=0; attempts<16; attempts++) { const candidate = codeGenerator(); if (!state.codes[candidate]) { code = candidate; break; } }
     if (!code) throw new RoomError("UNAVAILABLE", "Could not create a room code. Please try again.");
-    const room: StoredRoom = { id: randomUUID(), code, ...data, status: "WAITING", hostPlayerProfileId: identity.playerProfileId, createdAt: new Date().toISOString(), players: [] };
+    const room: StoredRoom = { id: randomUUID(), code, ...data, status: "WAITING", hostPlayerProfileId: identity.playerProfileId, createdAt: new Date(now()).toISOString(), players: [] };
     state.rooms[room.id] = room; state.codes[code] = room.id;
     return { result: join(state,identity,room) };
    },guard);
@@ -121,7 +131,7 @@ export function createRoomService(redis: () => RedisClient | undefined, options:
     else {
      if (room.hostPlayerProfileId === playerId) room.hostPlayerProfileId = room.players[0]!.playerProfileId;
      for (const player of room.players) player.isHost = player.playerProfileId === room.hostPlayerProfileId;
-     if (room.status === "STARTING") reset(room);
+     if (room.status === "STARTING" || (room.status === "FINISHED" && room.players.every(p=>room.returnedPlayerProfileIds?.includes(p.playerProfileId)))) reset(room);
     }
     return { result: null };
    },guard);
@@ -134,7 +144,7 @@ export function createRoomService(redis: () => RedisClient | undefined, options:
     const room = requireRoom(state,playerId); waiting(room);
     if (room.hostPlayerProfileId !== playerId) throw new RoomError("NOT_HOST", "Only the host can start the readiness check.");
     if (room.players.length < 2 || !room.players.every(p => p.ready && p.connected)) throw new RoomError("NOT_READY", "At least two players are required, and everyone including the host must be ready.");
-    room.status = "STARTING"; room.launchEndsAt = Date.now() + startDelay;
+    room.status = "STARTING"; room.gameId = randomUUID(); room.launchEndsAt = now() + startDelay;
     return { result: safeRoom(room), readyRoomId: room.id };
    },guard);
    const timer = setTimeout(() => { timers.delete(timer); void execute(() => ({ result: null })).catch(() => logger.warn("lobby.start_transition_failed")); }, startDelay + 10).unref();

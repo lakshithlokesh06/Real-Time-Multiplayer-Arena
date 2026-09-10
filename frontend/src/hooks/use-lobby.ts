@@ -19,11 +19,13 @@ export function useLobby() {
  useEffect(() => {
   if (!playerId) return;
   const socket = createArenaSocket(); socketRef.current = socket;
+  let currentGameId: string | undefined;
   let pingAt = 0;
   const ping = () => { if (socket.connected) { pingAt = performance.now(); socket.emit("system:ping"); } };
   const pingTimer = setInterval(ping, 5000);
   socket.on("system:pong", () => { if (networkRef.current) networkRef.current.latency = performance.now() - pingAt; });
   socket.on("game:state", snapshot => {
+   if(currentGameId!==snapshot.gameId || !snapshot.players.some(p=>p.playerProfileId===playerId))return;
    if (networkRef.current?.latest.gameId === snapshot.gameId) networkRef.current.accept(snapshot);
    else { const next = new ArenaNetwork(socket, playerId, snapshot); networkRef.current = next; setNetwork(next); }
   });
@@ -34,11 +36,11 @@ export function useLobby() {
    socket.timeout(5000).emit("room:sync",{},(timeout,result) => {
     if (socketRef.current !== socket || !socket.connected) return;
     if (timeout) setError("The lobby did not respond. Please retry.");
-    else if (result.ok) setRoom(result.data);
+    else if (result.ok) { currentGameId=result.data?.gameId;setRoom(result.data); }
     else setError(result.error.message);
    });
   });
-  socket.on("room:state",state => { setRoom(state); if (!state) { setNotice(""); networkRef.current = null; setNetwork(null); } });
+  socket.on("room:state",state => { currentGameId=state?.gameId;setRoom(state); if (!state?.gameId) { setNotice(""); networkRef.current = null; setNetwork(null); } });
   socket.on("rooms:list",setRooms);
   socket.on("room:ready-to-start",event => setNotice(event.message));
   socket.on("lobby:replaced",() => { setConnection("Opened in another tab"); setError("This player's lobby is now controlled from another tab. Reconnect here to take over."); });
@@ -66,6 +68,7 @@ export function useLobby() {
   joinCode: (code: string) => run(socket => socket.timeout(5000).emitWithAck("room:join-code",{code})),
   leave: () => run(socket => socket.timeout(5000).emitWithAck("game:leave",{})),
   ready: (ready: boolean) => run(socket => socket.timeout(5000).emitWithAck("room:set-ready",{ready})),
+  returnToLobby: () => run(socket=>socket.timeout(5000).emitWithAck("room:return",{})),
   start: () => run(socket => socket.timeout(5000).emitWithAck("room:start",{})),
   refreshRooms: () => run(socket => socket.timeout(5000).emitWithAck("rooms:list",{})),
  };

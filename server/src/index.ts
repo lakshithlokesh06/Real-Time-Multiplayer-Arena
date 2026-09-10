@@ -8,6 +8,8 @@ import { createDatabase } from "./config/database.js";
 import { createAuthService } from "./services/auth.js";
 if (!env.databaseUrl) throw new Error("DATABASE_URL is required");
 const db = createDatabase(env.databaseUrl);
+import { createMatchService } from "./services/matches.js";
+const matches=createMatchService(db,env.matchDurationSeconds);
 const auth = createAuthService(db, env);
 const cleanup = () => { void auth.cleanupExpired().catch(() => logger.warn("sessions.cleanup_failed")); };
 const cleanupInterval = setInterval(cleanup, 60 * 60 * 1000).unref();
@@ -15,8 +17,8 @@ cleanup();
 import { createRoomService } from "./services/rooms.js";
 const redis = createOptionalRedis(env.redisUrl);
 const rooms = createRoomService(() => redis.client);
-const server = createServer(createApp(env, auth, () => redis.status));
-const io = attachSocketServer(server, env, auth, rooms);
+const server = createServer(createApp(env, auth, () => redis.status,matches));
+const io = attachSocketServer(server, env, auth, rooms, undefined, matches);
 server.on("error", error => { logger.error("server.failed", { message: error.message }); redis.close(); process.exitCode = 1; });
 server.listen(env.port, () => { logger.info("server.listening", { port: env.port }); void redis.connect(); });
 let stopping = false;
@@ -26,7 +28,7 @@ function shutdown() {
  logger.info("server.stopping");
  const timeout = setTimeout(() => process.exit(1), 5000).unref();
  clearInterval(cleanupInterval);
- io.close(() => { void rooms.close().finally(() => { redis.close(); return db.$disconnect(); }).finally(() => { clearTimeout(timeout); process.exitCode = 0; }); });
+ io.close(() => { void io.waitForCleanup().finally(() => { redis.close(); return db.$disconnect(); }).finally(() => { clearTimeout(timeout); process.exitCode = 0; }); });
 }
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

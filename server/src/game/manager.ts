@@ -1,41 +1,49 @@
 import { performance } from "node:perf_hooks";
 import { z } from "zod";
-import { ARENA, move } from "@arena/shared/game";
-import type { GameInput, GamePlayer, GameSnapshot, RoomState } from "@arena/shared";
+import { ARENA, COMBAT, move } from "@arena/shared/game";
+import type { GameInput, GameSnapshot, RoomState } from "@arena/shared";
 import type { LobbySnapshot } from "../services/rooms.js";
 import { RoomError } from "../services/rooms.js";
-export const inputSchema = z.strictObject({ gameId: z.string().uuid(), sequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER), up: z.boolean(), down: z.boolean(), left: z.boolean(), right: z.boolean() });
-type Player = { state: GamePlayer; pending?: GameInput; received: number };
+import { CombatSimulation, combatSchema } from "./combat.js";
+import type { PlayerRuntime } from "./player.js";
+export const inputSchema = z.strictObject({ life: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(), gameId: z.string().uuid(), sequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER), up: z.boolean(), down: z.boolean(), left: z.boolean(), right: z.boolean() });
 export class GameInstance {
- readonly players = new Map<string, Player>();
+ readonly players = new Map<string, PlayerRuntime>();
+ readonly combat: CombatSimulation;
  tick = 0;
  constructor(readonly roomId: string, readonly gameId: string, room: RoomState, readonly tickRate: number) {
+  this.combat = new CombatSimulation(this.players, tickRate);
   room.players.forEach((player, index) => {
    const angle = index * Math.PI * 2 / room.players.length;
-   this.players.set(player.playerProfileId, { received: 0, state: { playerProfileId: player.playerProfileId, username: player.username, displayName: player.displayName, connected: player.connected, x: ARENA.width / 2 + Math.cos(angle) * 230, y: ARENA.height / 2 + Math.sin(angle) * 230, lastSequence: 0 } });
+   this.players.set(player.playerProfileId, { received: 0, nextShotTick: 0, respawnTick: 0, previousX: 0, previousY: 0, state: { health: COMBAT.maxHealth, maxHealth: COMBAT.maxHealth, alive: true, respawnInMs: 0, eliminations: 0, deaths: 0, aimX: 1, aimY: 0, life: 0, lastCombatSequence: 0, playerProfileId: player.playerProfileId, username: player.username, displayName: player.displayName, connected: player.connected, x: ARENA.width / 2 + Math.cos(angle) * 230, y: ARENA.height / 2 + Math.sin(angle) * 230, lastSequence: 0 } });
   });
  }
  input(id: string, input: GameInput) {
   const player = this.players.get(id);
   if (!player?.state.connected) throw new RoomError("NOT_MEMBER", "You are not controlling a player in this game.");
+  if (!player.state.alive || (input.life ?? 0) !== player.state.life) return;
   if (input.sequence <= player.received) return;
   player.received = input.sequence;
   // Coalesce to one intent per server tick. Packet spam never buys simulation time.
   player.pending = input;
  }
- freeze(id: string) { const p = this.players.get(id); if (p) { p.pending = undefined; p.received = p.state.lastSequence; p.state.connected = false; } }
+ freeze(id: string) { const p = this.players.get(id); if (p) { p.pending = undefined; p.pendingFire = undefined; p.received = p.state.lastSequence; p.state.connected = false; } }
  step() {
   this.tick++;
+  this.combat.respawn(this.tick);
   for (const player of this.players.values()) {
+   player.previousX = player.state.x; player.previousY = player.state.y;
    if (player.state.connected && player.pending) {
     Object.assign(player.state, move(player.state, player.pending, 1 / this.tickRate));
     player.state.lastSequence = player.pending.sequence;
    }
    player.pending = undefined;
   }
+  this.combat.step(this.tick);
  }
+ remove(id: string) { this.combat.removeOwner(id); this.players.delete(id); }
  snapshot(serverTime = performance.now()): GameSnapshot {
-  return { gameId: this.gameId, roomId: this.roomId, tick: this.tick, serverTime, tickRate: this.tickRate, snapshotRate: this.tickRate / Math.ceil(this.tickRate / 10), players: Array.from(this.players.values(), player => ({ ...player.state })) };
+  return { gameId: this.gameId, roomId: this.roomId, tick: this.tick, serverTime, tickRate: this.tickRate, snapshotRate: this.tickRate / Math.ceil(this.tickRate / 10), projectiles: this.combat.snapshot(), players: Array.from(this.players.values(), player => ({ ...player.state })) };
  }
 }
 export class GameManager {
@@ -51,7 +59,7 @@ export class GameManager {
    if (!game) { game = new GameInstance(room.id, room.gameId, room, this.tickRate); this.games.set(room.gameId, game); }
    for (const [id, player] of game.players) {
     const member = room.players.find(p => p.playerProfileId === id);
-    if (!member) game.players.delete(id);
+    if (!member) game.remove(id);
     else { if (!member.connected) game.freeze(id); player.state.connected = member.connected; }
    }
   }
@@ -59,13 +67,20 @@ export class GameManager {
  }
  sync(id: string) { for (const game of this.games.values()) if (game.players.has(id)) return game.snapshot(); return null; }
  freeze(id: string) { for (const game of this.games.values()) game.freeze(id); }
- remove(id: string) { for (const [key, game] of this.games) { game.players.delete(id); if (!game.players.size) this.games.delete(key); } }
+ remove(id: string) { for (const [key, game] of this.games) { game.remove(id); if (!game.players.size) this.games.delete(key); } }
  input(id: string, payload: unknown) {
   const parsed = inputSchema.safeParse(payload);
   if (!parsed.success) throw new RoomError("INVALID_INPUT", "Invalid movement input.");
   const game = this.games.get(parsed.data.gameId);
   if (!game) throw new RoomError("NOT_MEMBER", "No active game membership.");
   game.input(id, parsed.data);
+ }
+ combatIntent(id: string, payload: unknown, fire: boolean) {
+  const parsed = combatSchema.safeParse(payload);
+  if (!parsed.success) throw new RoomError("INVALID_INPUT", "Invalid combat intent.");
+  const game = this.games.get(parsed.data.gameId);
+  if (!game) throw new RoomError("NOT_MEMBER", "No active game membership.");
+  game.combat.intent(id, parsed.data, fire, game.tick);
  }
  step() { for (const game of this.games.values()) { game.step(); if (game.tick % Math.ceil(this.tickRate / 10) === 0) this.broadcast(game.snapshot()); } }
  start() {

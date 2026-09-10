@@ -1,6 +1,6 @@
 # Architecture
 
-Phase 4 extends the existing npm workspace monorepo. React/Next.js handles account UI; Express handles REST; Socket.IO shares the Node HTTP server; Prisma/PostgreSQL owns player identity and sessions. Redis owns ephemeral rooms; it remains optional for authentication. Authoritative movement runs in server memory. Combat, matchmaking, leaderboards, and match completion remain deferred.
+Phase 5 extends the existing npm workspace monorepo. React/Next.js handles account UI; Express handles REST; Socket.IO shares the Node HTTP server; Prisma/PostgreSQL owns player identity and sessions. Redis owns ephemeral rooms; it remains optional for authentication. Authoritative movement and combat run in server memory. Matchmaking, persistent statistics, leaderboards, and match completion remain deferred.
 
 ## Frontend boundaries
 
@@ -109,17 +109,17 @@ All commands revalidate the database session and use server-derived profile iden
 Room tests additionally require explicit TEST_REDIS_URL using database /15, use random test keys, and never FLUSHDB. They prove actual Redis snapshots/cleanup/TTL alongside real authenticated sockets and isolated PostgreSQL accounts.
 
 
-## Phase 4 authoritative simulation
+## Authoritative simulation
 
 `server/src/game/manager.ts` separates `GameInstance` (players, input, fixed steps, safe snapshots) from `GameManager` (room reconciliation, instance lookup, one shared scheduler, cleanup). Socket handlers validate transport ownership and route intent; they do not integrate positions. Room commits reconcile the in-memory manager before broadcasting room metadata. The first scheduled snapshot supplies game initialization; `game:sync` can explicitly retrieve the authenticated player's current instance. Snapshots replace redundant player-joined/left events.
 
 The default `GAME_TICK_RATE=20` means one 50 ms simulation step. Environment validation permits integer rates 10–60. A monotonic `performance.now()` accumulator measures actual elapsed time, schedules the next wake against the remaining interval, and caps catch-up at five steps after an event-loop stall. Excess stalled wall time is discarded rather than allowing a huge movement leap. All games share one timer; there are no player simulation timers. Snapshots are broadcast every `ceil(tickRate / 10)` ticks, exactly 10 Hz at the default 20 Hz. At other settings the advertised snapshot rate is `tickRate / ceil(tickRate / 10)`. Snapshots include monotonic server time, tick, rates, room/game IDs, safe player labels, position, connected flag, and last processed sequence.
 
-The world is centrally defined as 1600 × 900, radius 18, speed 260 world units/second. Up to eight initial players receive deterministic, distinct positions on a radius-230 ring around the center, in room join order. Input and acknowledgements start empty/zero. No client chooses a spawn. Shared movement normalizes diagonal direction, cancels opposing keys, and clamps the player's center to `[18,1582] × [18,882]`.
+The world is centrally defined as 1600 × 900, radius 18, speed 260 world units/second. Up to eight initial players receive deterministic, distinct positions on a radius-230 ring around the center, in room join order. Input and acknowledgements start empty/zero. No client chooses a spawn. Initial combat state is full health, alive, and zero live counters. Shared movement normalizes diagonal direction, cancels opposing keys, and clamps the player's center to `[18,1582] × [18,882]`.
 
 ### Input and trust boundary
 
-`game:input` carries only `{gameId, sequence, up, down, left, right}`. It has no acknowledgement callback; snapshots acknowledge processed sequences. Zod rejects unknown fields, invalid booleans, nonintegral/unsafe sequences, and invalid game IDs. Identity comes exclusively from authenticated socket data. The active controller and unexpired session must own a connected player in an initialized IN_GAME instance. Inputs before launch, after removal, from a replaced tab, or targeting another match cannot control a player.
+`game:input` carries only `{gameId, life, sequence, up, down, left, right}`. The life generation prevents pre-elimination inputs from applying after respawn; an omitted life is treated as the initial generation zero for the retained Phase 4 contract. It has no acknowledgement callback; snapshots acknowledge processed sequences. Zod rejects unknown fields, invalid booleans, nonintegral/unsafe sequences, and invalid game IDs. Identity comes exclusively from authenticated socket data. The active controller and unexpired session must own a connected player in an initialized IN_GAME instance. Inputs before launch, after removal, from a replaced tab, or targeting another match cannot control a player.
 
 Each player has at most one queued intent: newer sequences replace it; duplicate/out-of-order sequences are ignored. Each simulation step consumes at most one intent and clears it. Missing packets stop movement; an old held-key message cannot move a disconnected or silent client indefinitely. A per-socket one-second window permits `2*tickRate + 10` packets, then rejects further packets. Errors are limited to one per second. Replacement sockets cannot multiply movement speed because simulation remains bounded per player per tick. The 16 KiB transport limit still applies. No per-tick or per-input database/Redis calls occur. Periodic session validation and diagnostic ping are separate from simulation.
 
@@ -135,4 +135,60 @@ The Phaser scene draws an original dark grid, center ring, visible boundary, out
 
 Intentional `game:leave` uses the existing serialized room leave operation. Game reconciliation removes the player; subsequent snapshots remove their marker. Earliest remaining member becomes metadata host, but game authority remains the server. The final departure removes room indices and the game instance. Transport loss immediately clears pending movement and freezes the player, while the existing five-second grace reserves membership. Reconnect replaces the controller, cancels expiry, restores connected state, and resumes the same in-memory position and game ID. Refresh recreates exactly one Phaser instance; cleanup destroys the previous instance/listeners. Explicit navigation, logout, or namespace disconnect leaves immediately. Grace expiry removes the frozen player even if Redis cleanup fails; Redis's existing TTL bounds stale metadata.
 
-High-frequency positions, inputs, acknowledgements, and simulation ticks live only in process memory. Redis stores room metadata, match ID/status, and membership; PostgreSQL stores accounts/sessions. Restart loses active games intentionally. Redis outage can block sync/leave/room commands while an existing in-memory game continues; recovery is not durable and requires operational restart if the Redis client becomes unavailable. This phase has no multi-server ownership, latency compensation for combat, persistent recovery, load benchmark, touch controls, player collision, obstacles, weapons, health, respawning, statistics, matchmaking, or match completion.
+High-frequency positions, inputs, acknowledgements, and simulation ticks live only in process memory. Redis stores room metadata, match ID/status, and membership; PostgreSQL stores accounts/sessions. Restart loses active games intentionally. Redis outage can block sync/leave/room commands while an existing in-memory game continues; recovery is not durable and requires operational restart if the Redis client becomes unavailable. This phase has no multi-server ownership, latency compensation for combat, persistent recovery, load benchmark, touch controls, player collision, obstacles, persistent statistics, matchmaking, or match completion.
+
+
+## Phase 5 combat architecture
+
+`server/src/game/combat.ts` owns `CombatSimulation`: validated aim/fire intent, projectile state, swept collisions, damage, elimination, and tick-based respawn. `player.ts` separates internal runtime fields from public player state. Each GameInstance owns one combat simulation and the existing GameManager still runs one fixed loop for every room. Socket handlers only authorize/rate-limit and route intent. There are no combat database calls, Redis writes, per-shot timers, or per-projectile intervals.
+
+Combat defaults are centralized and frozen in `COMBAT` in `shared/game.js`:
+
+| Setting | Value |
+| --- | --- |
+| Weapon | Basic Blaster; click or modest automatic fire while held |
+| Maximum health | 100 |
+| Damage | 25 per hit |
+| Projectile speed | 800 world units/second |
+| Projectile radius | 5 units (player radius remains 18) |
+| Fire cooldown | 300 ms; six ticks at 20 Hz |
+| Projectile lifetime | 2,000 ms; 40 ticks at 20 Hz |
+| Respawn delay | 3,000 ms; 60 ticks at 20 Hz |
+| Muzzle offset | 26 units, bounded to the arena |
+| Spawn protection | Deferred; no invulnerability window |
+
+Timings convert to `ceil(milliseconds * tickRate / 1000)` simulation ticks. The server owns deadlines, so clients cannot shorten cooldown, lifetime, or respawn by changing timestamps or frame rates. Changing the shared constants configures the weapon/respawn defaults; the combat module also accepts a typed configuration for deterministic isolated use. There is no ammunition or reload system.
+
+### Aim and fire protocol
+
+Both `game:aim` and `game:fire` carry only `{gameId, life, sequence, aimX, aimY}`. A strict Zod schema rejects unknown fields, nonfinite/out-of-range components, near-zero vectors, and invalid sequence/life values. Components must be within [-1,1]; the server normalizes valid nonzero directions. `game:aim` updates safe synchronized aim and does not shoot. `game:fire` queues at most one normalized fire intent until the next simulation tick.
+
+The socket must be authenticated, current for that profile, and unexpired. Game membership/connected state must match the server's live instance. Dead-player and previous-life intents are ignored: legitimate packets can arrive after elimination, so those do not produce misleading control errors. They never queue movement or shots. Unknown games, outsiders, malformed payloads, and expired controllers are rejected. Aim/fire share a separate 60-events/second secondary socket limit; movement retains its previous limit. All game errors remain throttled to at most one per second.
+
+Aim/fire sequences are monotonically increasing together; `lastCombatSequence` is included for refresh recovery. Duplicate/stale sequences cannot replay a shot. The weapon cooldown is enforced again when consuming the queued shot, independent of event volume. Coalescing means even a burst of hundreds of packets cannot create hundreds of projectiles. The next-tick eligibility check allows firing exactly at the cooldown deadline without adding another tick of latency. A tab takeover clears queued fire but preserves weapon cooldown, health, counters, and respawn deadlines.
+
+### Projectile lifecycle and collisions
+
+Every shot gets a server-generated UUID. Spawn comes from the canonical player position plus the normalized muzzle offset, clamped within the world. Direction, speed, damage, birth tick, and expiry tick are all server-owned. Safe projectile snapshots include only ID, owner profile ID, position, and direction; internal speed/damage/deadlines are not serialized. New shots appear after that tick's existing-projectile collision phase and begin travelling on the following tick.
+
+Each tick advances existing projectiles, removes expired projectiles, sweeps against living player circles, applies at most one nearest hit, and removes world-exiting projectiles. The sweep solves the earliest segment/circle intersection at combined radius 23. It uses relative projectile/target motion between the beginning and end of the tick, reducing tunneling even when a moving target crosses a bolt. Stable roster iteration breaks equal-distance ties. The short player-center→muzzle segment is also swept against opponents so close/overlapping targets cannot be skipped. Own projectiles always exclude their owner. There is no piercing, player collision, or obstacle geometry.
+
+A hit reduces health by 25 and clamps at zero. At zero, the target becomes dead exactly once, increments deaths, and credits one elimination to the projectile owner if still present. Movement and queued fire clear. Already-dead targets are skipped, so they cannot be repeatedly eliminated. Projectiles fired before an owner's death remain active and can earn posthumous eliminations; explicit leave removes all of that owner's projectiles. Health/counters are live match memory only and never create durable statistics or leaderboard records.
+
+### Respawn, disconnects, and refresh
+
+The server sets an internal respawn tick and publishes only the remaining delay in milliseconds. At the deadline it restores full health, marks alive, clears queued movement/fire, resets weapon availability and aim, and increments the player's life generation. Movement sequence acknowledgements advance to discard pre-death pending state. The life generation prevents packets sent before death from moving/shooting the newly respawned player.
+
+Respawn selects the candidate with greatest minimum distance from other living players among nine fixed points: x ∈ {100,800,1500}, y ∈ {100,450,800}. Stable candidate order breaks ties. Disconnected living players count as occupied. This is a deterministic separation heuristic, not a guarantee against every in-flight projectile; spawn protection is deliberately deferred. A disconnected player can respawn during grace but remains frozen and cannot fire until connection ownership is restored.
+
+During the existing five-second transport grace, players remain damageable. Disconnect immediately clears pending control; already-fired projectiles keep travelling. This prevents disconnect-to-invulnerability abuse. Reconnect/refresh uses the existing in-memory player and preserves health, position, alive/dead state, countdown, cooldown, eliminations, deaths, and membership. A second tab becomes the only controller; old handlers check ownership again and cannot act. Grace expiry/explicit leave removes the player and owned projectiles; final departure cleans the room and game instance. No winner selection or automatic match termination is added.
+
+### Frontend combat boundaries
+
+`ArenaInput` owns keyboard focus and mouse intent. It fires the first shot on canvas pointer-down so a quick down/up between animation frames is not lost, then repeats while held at the shared cooldown. React buttons never arm firing. Pointer release, leaving the canvas, window blur, death, or loss of arena focus stops held fire. Gameplay only captures movement with arena focus. Pointer coordinates are transformed through the Phaser camera into an aim direction; coordinates never become server projectile positions.
+
+`PlayerRenderer` owns marker/name rendering, aim barrels, compact health bars, a brief white hit flash, dead opacity/text, and respawn position snapping. `ProjectileRenderer` draws original procedural glowing bolts from authoritative snapshot IDs only. It visually advances the latest position along the known direction for at most 100 ms between 10 Hz snapshots, clamps at world edges, corrects from each next snapshot, and immediately removes IDs missing from the newest state. It never creates hits or damage. Very short-lived shots may only be represented by the resulting health/flash state between snapshots; no redundant effect events are sent.
+
+Movement prediction remains independent of combat. The shared reconciliation function clears pending inputs when dead and only replays inputs matching the current life. Remote player interpolation snaps across life/alive transitions instead of interpolating a respawn across the map. `ArenaNetwork` exposes snapshot subscriptions to a small React combat HUD through `useSyncExternalStore`; Phaser still owns per-frame rendering. The HUD shows textual health, Alive/Respawning countdown, eliminations/deaths, Basic Blaster, existing room/connection information, and Leave Arena. Controls read “Move: WASD / Arrows · Aim: Mouse · Fire: Left Click (hold)”. Debug remains optional and off by default.
+
+With eight players, 300 ms cooldown and two-second lifetime bound steady projectile counts to about 56 per game, usually fewer due to collisions/boundaries. Sweeping every projectile against at most eight players is deliberately simple at this scale. Snapshots remain 10 Hz by default and contain no visual particle/event noise. No production load test, lag compensation, hit prediction, touch combat scheme, ammo/reload, spawn protection, persistent scores, match history, win conditions, matchmaking, leaderboard, spectators, bots, or deployment is included.

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { ArenaNetwork } from "@/game/network";
 import { GameLoader } from "./game-loader";
 function Diagnostics({ network }: { network: ArenaNetwork }) {
@@ -9,7 +9,12 @@ function Diagnostics({ network }: { network: ArenaNetwork }) {
  const self = snapshot.players.find(p => p.playerProfileId === network.playerId)!;
  return <pre className="arena-debug" aria-label="Network diagnostics">{`Tick ${snapshot.tick} · ${snapshot.tickRate} Hz simulation / ${snapshot.snapshotRate} Hz snapshots\nRTT ${Math.round(network.latency)} ms · pending ${network.pending.length}\nPredicted ${network.position.x.toFixed(1)}, ${network.position.y.toFixed(1)}\nAuthoritative ${self.x.toFixed(1)}, ${self.y.toFixed(1)}\n${snapshot.players.map(p => `${p.displayName}: ${p.x.toFixed(1)}, ${p.y.toFixed(1)}${p.connected ? "" : " (reconnecting)"}`).join("\n")}`}</pre>;
 }
+function CombatStatus({ network }: { network: ArenaNetwork }) {
+ const snapshot = useSyncExternalStore(network.subscribe, network.getSnapshot, network.getSnapshot);
+ const self = snapshot.players.find(p => p.playerProfileId === network.playerId)!;
+ return <section className="combat-status" aria-label="Combat status"><div><span>Basic Blaster</span><strong>Health: {self.health} / {self.maxHealth}</strong></div><p role="status">{self.alive ? "Alive" : `Respawning in ${(self.respawnInMs / 1000).toFixed(1)}s`}</p><p>Eliminations: {self.eliminations} <span>·</span> Deaths: {self.deaths}</p></section>;
+}
 export function ArenaHUD({ network, name, count, connection, leave, busy, error }: { network: ArenaNetwork; name: string; count: number; connection: string; leave: () => void; busy: boolean; error: string }) {
  const [debug, setDebug] = useState(false);
- return <main id="main" className="player-page arena-page"><header className="arena-hud"><div><p className="eyebrow">LIVE ARENA</p><h1>{name}</h1><p role="status">{count} players · {connection}</p></div><button className="button button-secondary" onClick={leave} disabled={busy}>Leave Arena</button></header>{error && <p role="alert">{error}</p>}<GameLoader network={network} /><div className="arena-controls"><p>Move: WASD / Arrow Keys <span>· Click the arena to focus</span></p><button className="button button-secondary" aria-pressed={debug} onClick={() => setDebug(!debug)}>Network debug</button></div>{debug && <Diagnostics network={network} />}</main>;
+ return <main id="main" className="player-page arena-page"><header className="arena-hud"><div><p className="eyebrow">LIVE ARENA</p><h1>{name}</h1><p role="status">{count} players · {connection}</p></div><button className="button button-secondary" onClick={leave} disabled={busy}>Leave Arena</button></header>{error && <p role="alert">{error}</p>}<CombatStatus network={network} /><GameLoader network={network} /><div className="arena-controls"><p>Move: WASD / Arrows <span>· Aim: Mouse · Fire: Left Click (hold)</span></p><button className="button button-secondary" aria-pressed={debug} onClick={() => setDebug(!debug)}>Network debug</button></div>{debug && <Diagnostics network={network} />}</main>;
 }

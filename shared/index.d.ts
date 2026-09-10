@@ -18,6 +18,8 @@ export type Ack<T> = (result: Result<T>) => void;
 export interface ClientToServerEvents {
  "game:sync": (payload: Record<string, never>, ack: Ack<GameSnapshot | null>) => void;
  "game:leave": (payload: Record<string, never>, ack: Ack<null>) => void;
+ "game:aim": (payload: CombatIntent) => void;
+ "game:fire": (payload: CombatIntent) => void;
  "game:input": (payload: GameInput) => void;
  "system:ping": () => void;
  "rooms:list": (payload: Record<string, never>, ack: Ack<PublicRoom[]>) => void;
@@ -39,6 +41,9 @@ export interface ServerToClientEvents {
  "lobby:replaced": () => void;
 }
 
-export interface GameInput { gameId: string; sequence: number; up: boolean; down: boolean; left: boolean; right: boolean }
-export interface GamePlayer { playerProfileId: string; username: string; displayName: string; x: number; y: number; lastSequence: number; connected: boolean }
-export interface GameSnapshot { gameId: string; roomId: string; tick: number; serverTime: number; tickRate: number; snapshotRate: number; players: GamePlayer[] }
+export interface GameInput { life?: number; gameId: string; sequence: number; up: boolean; down: boolean; left: boolean; right: boolean }
+export interface GamePlayer { health: number; maxHealth: number; alive: boolean; respawnInMs: number; eliminations: number; deaths: number; aimX: number; aimY: number; life: number; lastCombatSequence: number; playerProfileId: string; username: string; displayName: string; x: number; y: number; lastSequence: number; connected: boolean }
+export interface GameSnapshot { gameId: string; roomId: string; tick: number; serverTime: number; tickRate: number; snapshotRate: number; players: GamePlayer[]; projectiles: GameProjectile[] }
+
+export interface CombatIntent { gameId: string; life: number; sequence: number; aimX: number; aimY: number }
+export interface GameProjectile { id: string; ownerPlayerProfileId: string; x: number; y: number; directionX: number; directionY: number }

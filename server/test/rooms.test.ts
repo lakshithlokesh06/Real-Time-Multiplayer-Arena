@@ -234,3 +234,45 @@ test("absolute session expiry rejects input immediately without a per-input data
  client.emit("game:input",movement(snapshot.gameId));await disconnected;
  await until(async () => (await state()).rooms[snapshot.roomId]?.players.length===1);
 });
+
+function shot(snapshot:GameSnapshot, sequence=1) {return {gameId:snapshot.gameId,life:0,sequence,aimX:-1,aimY:0};}
+function nextGame(client:Client, predicate:(s:GameSnapshot)=>boolean, timeout=2500) {
+ return new Promise<GameSnapshot>((resolve,reject)=>{
+  const timer=setTimeout(()=>{client.off("game:state",listener);reject(new Error("Game snapshot condition timed out"));},timeout);
+  const listener=(s:GameSnapshot)=>{if(predicate(s)){clearTimeout(timer);client.off("game:state",listener);resolve(s);}};
+  client.on("game:state",listener);
+ });
+}
+test("unauthenticated clients cannot establish a combat socket",async()=>{await assert.rejects(connect(),/Authentication required/);});
+test("combat socket rejects wrong-game and forged damage payloads",async()=>{
+ const snapshot=await launch();const a=users[0]!.client,b=users[1]!.client;
+ const denied=new Promise<{code:string}>(resolve=>a.once("game:error",resolve));a.emit("game:fire",{...shot(snapshot),gameId:randomUUID()});assert.equal((await denied).code,"NOT_MEMBER");
+ const forged=new Promise<{code:string}>(resolve=>b.once("game:error",resolve));b.emit("game:fire",{...shot(snapshot),damage:999} as never);assert.equal((await forged).code,"INVALID_INPUT");
+});
+test("combat socket rejects outsiders and expiry without authorizing a shot",async()=>{
+ const snapshot=await launch();const outsider=users[2]!.client;
+ const denied=new Promise<{code:string}>(resolve=>outsider.once("game:error",resolve));outsider.emit("game:fire",shot(snapshot));assert.equal((await denied).code,"NOT_MEMBER");
+ const a=users[0]!.client;server.io.sockets.sockets.get(a.id!)!.data.sessionExpiresAt=Date.now()-1;
+ const disconnected=new Promise<void>(resolve=>a.once("disconnect",()=>resolve()));a.emit("game:fire",shot(snapshot));await disconnected;
+});
+test("real sockets synchronize projectiles and damage, and refresh preserves reduced health",async()=>{
+ const snapshot=await launch(),a=users[0]!.client,b=users[1]!.client;
+ const projectile=nextGame(b,s=>s.projectiles.length>0);const damaged=nextGame(b,s=>s.players[1]!.health===75);
+ a.emit("game:fire",shot(snapshot));assert.equal((await projectile).projectiles[0]!.ownerPlayerProfileId,users[0]!.id);await damaged;
+ b.io.engine!.close();const replacement=await connect(users[1]!.cookie);const recovered=(await game(replacement))!;
+ assert.equal(recovered.gameId,snapshot.gameId);assert.equal(recovered.players[1]!.health,75);assert.equal(recovered.players[1]!.alive,true);assert.equal(recovered.players[1]!.deaths,0);
+});
+test("combat flood cannot bypass cooldown and rate limiting",async()=>{
+ const snapshot=await launch(),a=users[0]!.client;const limited=new Promise<{code:string}>(resolve=>a.once("game:error",resolve));const state=nextGame(a,s=>s.projectiles.length>0);
+ for(let n=1;n<=100;n++)a.emit("game:fire",shot(snapshot,n));assert.equal((await limited).code,"RATE_LIMITED");assert.equal((await state).projectiles.length,1);
+});
+test("replaced controller cannot fire through an old registered server handler",async()=>{
+ const snapshot=await launch(),old=users[0]!.client;const handler=server.io.sockets.sockets.get(old.id!)!.listeners("game:fire")[0]!;
+ const disconnected=new Promise<void>(resolve=>old.once("disconnect",()=>resolve()));const replacement=await connect(users[0]!.cookie);await disconnected;await game(replacement);
+ handler(shot(snapshot,100));const unchanged=await nextGame(replacement,()=>true);assert.equal(unchanged.projectiles.length,0);
+ const created=nextGame(replacement,s=>s.projectiles.length>0);replacement.emit("game:fire",shot(snapshot));assert.equal((await created).projectiles.length,1);
+});
+test("leaving combat removes owned projectiles from remaining clients",async()=>{
+ const snapshot=await launch(),a=users[0]!.client,b=users[1]!.client;const created=nextGame(b,s=>s.projectiles.length>0);a.emit("game:fire",{...shot(snapshot),aimX:0,aimY:-1});await created;
+ unwrap(await a.timeout(3000).emitWithAck("game:leave",{}));const remaining=(await game(b))!;assert.equal(remaining.players.length,1);assert.equal(remaining.projectiles.length,0);
+});

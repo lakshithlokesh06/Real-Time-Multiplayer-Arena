@@ -77,6 +77,21 @@ export function configureLobby(io: LobbyServer, auth: AuthService, rooms?: RoomS
     if (now - lastError >= 1000) { const safe = error instanceof RoomError ? error : new RoomError("INVALID_INPUT", "Invalid movement input."); socket.emit("game:error", { code: safe.code, message: safe.message }); lastError = now; }
    }
   });
+  let combatWindow = performance.now(), combatCount = 0;
+  const combat = (fire: boolean) => (payload: import("@arena/shared").CombatIntent) => {
+   if (!active()) return;
+   const now = performance.now();
+   if (now - combatWindow >= 1000) { combatWindow = now; combatCount = 0; }
+   try {
+    if (Date.now() >= socket.data.sessionExpiresAt) { socket.disconnect(true); return; }
+    if (++combatCount > 60) throw new RoomError("RATE_LIMITED", "Combat input rate exceeded.");
+    games.combatIntent(id, payload, fire);
+   } catch (error) {
+    if (now - lastError >= 1000) { const safe = error instanceof RoomError ? error : new RoomError("INVALID_INPUT", "Invalid combat intent."); socket.emit("game:error", { code: safe.code, message: safe.message }); lastError = now; }
+   }
+  };
+  socket.on("game:aim", combat(false));
+  socket.on("game:fire", combat(true));
   socket.on("game:sync",command(roomSchemas.empty, async service => { await service.sync(id,active); return games.sync(id); }));
   socket.on("game:leave",command(roomSchemas.empty,service => service.leave(id,active)));
   socket.on("rooms:list",command(roomSchemas.empty,service => service.list(active)));

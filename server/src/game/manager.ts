@@ -19,7 +19,9 @@ export class GameInstance {
  readonly durationSeconds: number;
  readonly deadline: number;
  private readonly now: () => number;
+ persistedResult: MatchResult | null = null;
  result: MatchResult | null = null;
+ readonly roomType: RoomState["roomType"];
  persistence: "SAVING" | "SAVED" | "FAILED" = "SAVED";
  tick = 0;
  constructor(readonly roomId: string, readonly gameId: string, room: RoomState, readonly tickRate: number, private readonly options: MatchOptions = {}) {
@@ -28,7 +30,7 @@ export class GameInstance {
   this.startedAt = room.matchStartedAt ?? new Date(wall).toISOString();
   this.durationSeconds = options.durationSeconds ?? 180;
   this.deadline = this.now() + this.durationSeconds*1000 - Math.max(0,wall-Date.parse(this.startedAt));
-  this.name = room.name;
+  this.name = room.name;this.roomType=room.roomType;
   this.combat = new CombatSimulation(this.players, tickRate);
   room.players.forEach((player, index) => {
    const angle = index * Math.PI * 2 / room.players.length;
@@ -43,7 +45,7 @@ export class GameInstance {
   this.combat.stop();
   const elapsed=reason==="TIME_LIMIT" ? this.durationSeconds*1000 : Math.max(0,this.durationSeconds*1000-this.remainingMs);
   const ranking=standings(Array.from(this.participants,([id,p])=>({playerProfileId:id,username:p.state.username,displayName:p.state.displayName,score:p.state.score,eliminations:p.state.eliminations,deaths:p.state.deaths,leftEarly:this.departed.has(id)})),reason==="TIME_LIMIT");
-  this.result={matchId:this.gameId,roomId:this.roomId,roomName:this.roomName,startedAt:this.startedAt,endedAt:new Date(Date.parse(this.startedAt)+elapsed).toISOString(),durationSeconds:Math.floor(elapsed/1000),endReason:reason,...ranking};
+  this.result={...(this.roomType==="MATCHMAKING"?{roomType:"MATCHMAKING" as const}:{}),matchId:this.gameId,roomId:this.roomId,roomName:this.roomName,startedAt:this.startedAt,endedAt:new Date(Date.parse(this.startedAt)+elapsed).toISOString(),durationSeconds:Math.floor(elapsed/1000),endReason:reason,...ranking};
   this.result.standings.forEach(Object.freeze);Object.freeze(this.result.standings);Object.freeze(this.result);
   this.options.onFinish?.(this);
  }
@@ -75,7 +77,7 @@ export class GameInstance {
  }
  remove(id: string) { if(!this.result && this.players.has(id))this.departed.add(id); this.combat.removeOwner(id); this.players.delete(id); }
  snapshot(serverTime = performance.now()): GameSnapshot {
-  return { match: {status:this.result?"FINISHED":"IN_GAME",startedAt:this.startedAt,durationSeconds:this.durationSeconds,remainingMs:this.remainingMs,result:this.result ? structuredClone(this.result) : null,persistence:this.persistence}, gameId: this.gameId, roomId: this.roomId, tick: this.tick, serverTime, tickRate: this.tickRate, snapshotRate: this.tickRate / Math.ceil(this.tickRate / 10), projectiles: this.combat.snapshot(), players: Array.from(this.players.values(), player => ({ ...player.state })) };
+  return { match: {status:this.result?"FINISHED":"IN_GAME",startedAt:this.startedAt,durationSeconds:this.durationSeconds,remainingMs:this.remainingMs,result:this.result ? structuredClone(this.persistedResult??this.result) : null,persistence:this.persistence}, gameId: this.gameId, roomId: this.roomId, tick: this.tick, serverTime, tickRate: this.tickRate, snapshotRate: this.tickRate / Math.ceil(this.tickRate / 10), projectiles: this.combat.snapshot(), players: Array.from(this.players.values(), player => ({ ...player.state })) };
  }
 }
 export class GameManager {

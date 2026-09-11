@@ -9,7 +9,7 @@ import { registerSchema, loginSchema, profileSchema, validate } from "./validati
 
 const passwordOptions = { type: argon2.argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1 } as const;
 const dummyPasswordHash = argon2.hash(randomBytes(32), passwordOptions);
-const playerSelect = { id: true, email: true, createdAt: true, profile: { select: { id: true, username: true, displayName: true } } } satisfies Prisma.UserSelect;
+const playerSelect = { id: true, email: true, createdAt: true, profile: { select: { id: true, username: true, displayName: true, rating: true } } } satisfies Prisma.UserSelect;
 type PlayerRecord = Prisma.UserGetPayload<{ select: typeof playerSelect }>;
 function safePlayer(user: PlayerRecord) {
  if (!user.profile) throw new HttpError(401, "Authentication required.");

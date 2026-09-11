@@ -1,0 +1,14 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {elo,expectedScore,INITIAL_RATING,K_FACTOR} from '../src/matchmaking/rating.js';
+import {candidates,emptyQueue,range,type Entry} from '../src/matchmaking/state.js';
+test('rating defaults and equal expected score',()=>{assert.equal(INITIAL_RATING,1000);assert.equal(K_FACTOR,32);assert.equal(expectedScore(1000,1000),0.5);});
+test('equal rating win and loss are 16 points',()=>{assert.deepEqual(elo(1000,1000,1),[1016,984]);assert.deepEqual(elo(1000,1000,0),[984,1016]);});
+test('upsets gain more and expected wins gain less',()=>{assert.ok(elo(800,1200,1)[0]-800>16);assert.ok(elo(1200,800,1)[0]-1200<16);});
+test('equal tie remains unchanged and unequal tie favors underdog',()=>{assert.deepEqual(elo(1000,1000,0.5),[1000,1000]);assert.ok(elo(800,1200,0.5)[0]>800);});
+test('rounding is deterministic, integer and zero sum without an arbitrary floor',()=>{for(const a of [-10,900,1000,1351])for(const b of [0,900,1400])for(const actual of [0,0.5,1] as const){const r=elo(a,b,actual);assert.ok(r.every(Number.isInteger));assert.equal(r[0]+r[1],a+b);assert.deepEqual(r,elo(a,b,actual));}});
+test('search range expands at exact boundaries and becomes unrestricted at 30 seconds',()=>{assert.equal(range(0),100);assert.equal(range(9999),100);assert.equal(range(10000),200);assert.equal(range(20000),300);assert.equal(range(30000),Infinity);});
+const entry=(id:string,rating:number,queuedAt=0):Entry=>({playerProfileId:id,username:id,displayName:id,rating,queuedAt});
+test('oldest compatible candidates pair first and each appears once',()=>{const q=emptyQueue();for(const p of [entry('c',1000,2),entry('b',1000,1),entry('a',1000,0),entry('d',1000,3)])q.entries[p.playerProfileId]=p;assert.deepEqual(candidates(q,4),[['a','b'],['c','d']]);});
+test('incompatible entries wait until the oldest search range expands',()=>{const q=emptyQueue();q.entries.a=entry('a',1000);q.entries.b=entry('b',1250);assert.deepEqual(candidates(q,0),[]);assert.deepEqual(candidates(q,20000),[['a','b']]);});
+test('disconnected, proposed and cooling-down pairs are excluded',()=>{const q=emptyQueue();q.entries.a=entry('a',1000);q.entries.b=entry('b',1000);q.entries.a.disconnectedAt=0;assert.deepEqual(candidates(q,0),[]);delete q.entries.a.disconnectedAt;q.entries.a.proposalId='p';assert.deepEqual(candidates(q,0),[]);delete q.entries.a.proposalId;q.cooldowns['a:b']=10;assert.deepEqual(candidates(q,9),[]);assert.deepEqual(candidates(q,10),[['a','b']]);});

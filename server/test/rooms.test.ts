@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { io, type Socket } from "socket.io-client";
-import type { ClientToServerEvents, ServerToClientEvents, RoomState, PublicRoom, Result, GameSnapshot } from "@arena/shared";
+import type { MatchmakingState, ClientToServerEvents, ServerToClientEvents, RoomState, PublicRoom, Result, GameSnapshot } from "@arena/shared";
 import { createOptionalRedis } from "../src/config/redis.js";
 import { createRoomService, type LobbySnapshot, generateRoomCode } from "../src/services/rooms.js";
 import { testDatabase, testServer, registration, cookieFrom } from "./helpers.js";
@@ -304,4 +304,49 @@ test('deadline during disconnect grace persists both players and reconnect resto
  const replacement=await connect(users[1]!.cookie);const restored=(await game(replacement))!;assert.deepEqual(restored.match.result,finished.match.result);assert.equal(restored.match.remainingMs,0);
  a.emit('game:fire',shot(first,99));a.emit('game:input',movement(first.gameId,99));await sleep(100);const frozen=(await game())!;assert.deepEqual(frozen.match.result,finished.match.result);assert.equal(frozen.projectiles.length,0);assert.deepEqual(frozen.players.map(p=>[p.x,p.y,p.health,p.score]),finished.players.map(p=>[p.x,p.y,p.health,p.score]));
  assert.deepEqual(await server.matches.detail(users[1]!.id,first.gameId),finished.match.result);
+});
+
+test('matchmaking socket rejects forged rating, opponent and acceptance deadline fields',async()=>{
+ for(const extra of [{rating:9999},{opponent:users[1]!.id},{queuedAt:0}])assert.equal(code(await users[0]!.client.timeout(3000).emitWithAck('matchmaking:join',extra as never)),'INVALID_INPUT');
+ assert.equal(code(await users[0]!.client.timeout(3000).emitWithAck('matchmaking:accept',{proposalId:randomUUID(),deadline:Date.now()+999999} as never)),'INVALID_INPUT');
+ assert.equal((unwrap(await users[0]!.client.timeout(3000).emitWithAck('matchmaking:sync',{}))).status,'IDLE');
+});
+test('real sockets accept an automatic match and enter the existing persisted game pipeline',async()=>{
+ for(const user of users.slice(0,2))unwrap(await user.client.timeout(3000).emitWithAck('matchmaking:join',{}));
+ const queueKey=`${key}:matchmaking:v1`;await until(async()=>Object.keys(JSON.parse((await redis.client!.get(queueKey))!).proposals).length===1);
+ const offer=unwrap<MatchmakingState>(await users[0]!.client.timeout(3000).emitWithAck('matchmaking:sync',{}));assert.equal(offer.status,'MATCH_FOUND');
+ unwrap(await users[0]!.client.timeout(3000).emitWithAck('matchmaking:accept',{proposalId:offer.proposalId!}));assert.equal(await current(),null);
+ unwrap(await users[1]!.client.timeout(3000).emitWithAck('matchmaking:accept',{proposalId:offer.proposalId!}));
+ await until(async()=>Object.values((await state()).rooms).some(r=>r.status==='IN_GAME'));
+ const room=(await current())!;assert.equal(room.roomType,'MATCHMAKING');assert.equal(room.maxPlayers,2);assert.equal((await list(users[2]!.client)).length,0);assert.equal((await game())!.gameId,room.gameId);
+ assert.equal((await database.db.match.findUniqueOrThrow({where:{id:room.gameId}})).roomType,'MATCHMAKING');assert.ok((await database.db.matchParticipant.findMany({where:{matchId:room.gameId}})).every(p=>p.ratingBefore===1000));
+ unwrap(await users[0]!.client.timeout(3000).emitWithAck('game:leave',{}));const denied=await users[0]!.client.timeout(3000).emitWithAck('matchmaking:join',{});assert.equal(code(denied),'NOT_WAITING');
+});
+test('newest controller recovers queue priority while replaced handler cannot cancel',async()=>{
+ const old=users[0]!.client;const queued=unwrap<MatchmakingState>(await old.timeout(3000).emitWithAck('matchmaking:join',{}));const handler=server.io.sockets.sockets.get(old.id!)!.listeners('matchmaking:cancel')[0]!;
+ const replacement=await connect(users[0]!.cookie);const recovered=unwrap<MatchmakingState>(await replacement.timeout(3000).emitWithAck('matchmaking:sync',{}));assert.equal(recovered.queuedAt,queued.queuedAt);
+ const denied=await new Promise<Result<unknown>>(resolve=>handler({},resolve));assert.equal(code(denied),'UNAUTHENTICATED');assert.equal(unwrap(await replacement.timeout(3000).emitWithAck('matchmaking:sync',{})).status,'QUEUED');
+});
+test('logout cleans queue membership and matchmaking command spam is bounded',async()=>{
+ const a=users[0]!.client;unwrap(await a.timeout(3000).emitWithAck('matchmaking:join',{}));await server.request('/api/auth/logout','POST',{},users[0]!.cookie);
+ await until(async()=>!JSON.parse((await redis.client!.get(`${key}:matchmaking:v1`))!).entries[users[0]!.id]);
+ let limited=false;for(let i=0;i<45;i++){const response=await users[1]!.client.timeout(3000).emitWithAck('matchmaking:sync',{});if(!response.ok){assert.equal(response.error.code,'RATE_LIMITED');limited=true;break;}}assert.ok(limited);
+});
+test('overlapping result saves keep matchmaking blocked until all of a player’s saves settle',async()=>{
+ const manual=await launch();unwrap(await users[0]!.client.timeout(3000).emitWithAck('game:leave',{}));
+ for(const i of [0,2])unwrap(await users[i]!.client.timeout(3000).emitWithAck('matchmaking:join',{}));
+ await until(async()=>Object.keys(JSON.parse((await redis.client!.get(`${key}:matchmaking:v1`))!).proposals).length===1);
+ const offer=unwrap<MatchmakingState>(await users[0]!.client.timeout(3000).emitWithAck('matchmaking:sync',{}));for(const i of [0,2])unwrap(await users[i]!.client.timeout(3000).emitWithAck('matchmaking:accept',{proposalId:offer.proposalId!}));
+ await until(async()=>Object.values((await state()).rooms).filter(r=>r.status==='IN_GAME').length===2);const rated=(await game())!;
+ const original=server.matches.finish.bind(server.matches);let releaseManual!:()=>void,releaseRated!:()=>void,manualSaved!:()=>void;
+ const manualSavedEvent=new Promise<void>(resolve=>manualSaved=resolve);
+ const manualGate=new Promise<void>(resolve=>releaseManual=resolve),ratedGate=new Promise<void>(resolve=>releaseRated=resolve);
+ server.matches.finish=async result=>{await (result.matchId===manual.gameId?manualGate:ratedGate);const saved=await original(result);if(result.matchId===manual.gameId)setImmediate(manualSaved);return saved;};
+ try{
+  unwrap(await users[1]!.client.timeout(3000).emitWithAck('game:leave',{}));
+  for(const i of [0,2])unwrap(await users[i]!.client.timeout(3000).emitWithAck('game:leave',{}));
+  releaseManual();await manualSavedEvent;
+  assert.equal(code(await users[0]!.client.timeout(3000).emitWithAck('matchmaking:join',{})),'NOT_WAITING');
+  releaseRated();await until(async()=> (await database.db.match.findUniqueOrThrow({where:{id:rated.gameId}})).status==='FINISHED');
+ }finally{releaseManual();releaseRated();}
 });

@@ -40,3 +40,7 @@ button,input{font:inherit}button{cursor:pointer}button:disabled{opacity:.6;curso
 .history-card summary { cursor: pointer; padding: .8rem 0; color: #c4f279; }
 .match-history { margin: 2rem 0; }
 @media(max-width:600px) { .result-banner { padding: 1.2rem; } .standings th,.standings td { padding: .6rem; } }
+
+.matchmaking-panel { border: 1px solid #71864e; background: linear-gradient(115deg,#203126,#101d24); border-radius: 16px; padding: clamp(1.25rem,4vw,2.5rem); margin: 1.5rem 0 2.5rem; }
+.matchmaking-panel h2 { font-size: clamp(1.6rem,4vw,2.8rem); margin: .6rem 0; }
+.rating-change { color: #c4f279; font-weight: 700; font-variant-numeric: tabular-nums; }

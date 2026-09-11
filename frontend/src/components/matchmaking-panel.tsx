@@ -1,0 +1,11 @@
+"use client";
+import {useEffect,useState} from 'react';
+import type {MatchmakingState} from '@arena/shared';
+export function MatchmakingPanel({state,rating,disabled,find,cancel,accept,decline}:{state:MatchmakingState;rating:number;disabled:boolean;find:()=>void;cancel:()=>void;accept:()=>void;decline:()=>void}){
+ const [clock,setClock]=useState({serverTime:0,elapsed:0});
+ const elapsed=clock.serverTime===state.serverTime?clock.elapsed:0;
+ useEffect(()=>{const start=performance.now();const timer=setInterval(()=>setClock({serverTime:state.serverTime,elapsed:performance.now()-start}),250);return()=>clearInterval(timer);},[state.serverTime]);
+ const now=state.serverTime+elapsed,seconds=Math.max(0,Math.ceil(((state.deadline??now)-now)/1000));
+ const searching=state.status==='QUEUED',offer=state.status==='MATCH_FOUND'||state.status==='ACCEPTED',assigned=state.status==='ASSIGNED';
+ return <section className="matchmaking-panel" aria-label="Automatic matchmaking"><p className="eyebrow">1V1 · QUICK MATCH</p><h2 aria-live="polite">{searching?'Searching for opponent…':state.status==='ACCEPTED'?'Waiting for opponent…':offer?'Match Found':assigned?'Preparing Arena…':'Your next rival awaits.'}</h2><p>MMR: {state.rating??rating} <span className="field-help">· Matchmaking rating</span></p>{searching?<><p role="status">Searching · {Math.max(0,Math.floor((now-(state.queuedAt??now))/1000))}s elapsed</p><button className="button secondary" disabled={disabled} onClick={cancel}>Cancel Search</button></>:offer?<><p role="status">Accept within {seconds}s</p><div className="actions"><button className="button primary" disabled={disabled||state.status==='ACCEPTED'||seconds===0} onClick={accept}>{state.status==='ACCEPTED'?'Accepted':'Accept'}</button><button className="button secondary" disabled={disabled} onClick={decline}>Decline</button></div></>:assigned?<p role="status">Both players accepted. Launching your match.</p>:<>{state.status==='TIMED_OUT'&&<p role="status">Your match offer expired. Find Match when you are ready.</p>}{state.status==='UNAVAILABLE'&&<p role="alert">Matchmaking is temporarily unavailable. Try again shortly.</p>}<p>Find an opponent, accept your match, and enter the arena.</p><button className="button primary" disabled={disabled} onClick={find}>Find Match</button></>}</section>;
+}

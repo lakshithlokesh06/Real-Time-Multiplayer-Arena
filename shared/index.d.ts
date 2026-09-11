@@ -5,6 +5,7 @@ export interface RoomPlayer {
  ready: boolean; connected: boolean; isHost: boolean; joinedAt: string;
 }
 export interface RoomState {
+ roomType?: "MANUAL" | "MATCHMAKING";
  matchStartedAt?: string; finishedAt?: string; returnedPlayerProfileIds?: string[]; gameId?: string; id: string; code: string; name: string; visibility: Visibility; status: RoomStatus;
  hostPlayerProfileId: string; maxPlayers: number; createdAt: string; players: RoomPlayer[];
 }
@@ -16,6 +17,11 @@ export type RoomErrorCode = "INVALID_INPUT" | "NOT_FOUND" | "ROOM_FULL" | "ALREA
 export type Result<T> = { ok: true; data: T } | { ok: false; error: { code: RoomErrorCode; message: string } };
 export type Ack<T> = (result: Result<T>) => void;
 export interface ClientToServerEvents {
+ "matchmaking:join": (payload: Record<string, never>, ack: Ack<MatchmakingState>) => void;
+ "matchmaking:cancel": (payload: Record<string, never>, ack: Ack<MatchmakingState>) => void;
+ "matchmaking:sync": (payload: Record<string, never>, ack: Ack<MatchmakingState>) => void;
+ "matchmaking:accept": (payload: {proposalId:string}, ack: Ack<MatchmakingState>) => void;
+ "matchmaking:decline": (payload: {proposalId:string}, ack: Ack<MatchmakingState>) => void;
  "game:sync": (payload: Record<string, never>, ack: Ack<GameSnapshot | null>) => void;
  "game:leave": (payload: Record<string, never>, ack: Ack<null>) => void;
  "game:aim": (payload: CombatIntent) => void;
@@ -33,6 +39,7 @@ export interface ClientToServerEvents {
  "room:start": (payload: Record<string, never>, ack: Ack<RoomState>) => void;
 }
 export interface ServerToClientEvents {
+ "matchmaking:state": (state: MatchmakingState) => void;
  "game:state": (snapshot: GameSnapshot) => void;
  "game:error": (error: { code: RoomErrorCode; message: string }) => void;
  "system:pong": (payload: { socketId: string; timestamp: string }) => void;
@@ -49,5 +56,7 @@ export interface GameSnapshot { match: { status: "IN_GAME" | "FINISHED"; started
 export interface CombatIntent { gameId: string; life: number; sequence: number; aimX: number; aimY: number }
 export interface GameProjectile { id: string; ownerPlayerProfileId: string; x: number; y: number; directionX: number; directionY: number }
 
-export interface MatchStanding { playerProfileId: string; username: string; displayName: string; score: number; eliminations: number; deaths: number; placement: number; isWinner: boolean; leftEarly: boolean }
-export interface MatchResult { matchId: string; roomId: string; roomName: string; startedAt: string; endedAt: string; durationSeconds: number; endReason: "TIME_LIMIT" | "EMPTY_ROOM"; tied: boolean; winnerPlayerProfileId: string | null; standings: MatchStanding[] }
+export interface MatchStanding { ratingBefore?:number; ratingAfter?:number; ratingDelta?:number; playerProfileId: string; username: string; displayName: string; score: number; eliminations: number; deaths: number; placement: number; isWinner: boolean; leftEarly: boolean }
+export interface MatchResult { roomType?:"MANUAL"|"MATCHMAKING"; matchId: string; roomId: string; roomName: string; startedAt: string; endedAt: string; durationSeconds: number; endReason: "TIME_LIMIT" | "EMPTY_ROOM"; tied: boolean; winnerPlayerProfileId: string | null; standings: MatchStanding[] }
+
+export interface MatchmakingState { status:"IDLE"|"QUEUED"|"MATCH_FOUND"|"ACCEPTED"|"ASSIGNED"|"CANCELLED"|"TIMED_OUT"|"UNAVAILABLE"; serverTime:number; queuedAt?:number; rating?:number; proposalId?:string; deadline?:number; roomId?:string; }

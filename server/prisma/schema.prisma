@@ -16,6 +16,7 @@ model User {
   sessions Session[]
 }
 model PlayerProfile {
+  rating Int @default(1000)
   matchParticipations MatchParticipant[]
   wonMatches Match[] @relation("MatchWinner")
   id String @id @default(uuid()) @db.Uuid
@@ -40,7 +41,12 @@ enum MatchStatus {
   IN_GAME
   FINISHED
 }
+enum RoomType {
+  MANUAL
+  MATCHMAKING
+}
 model Match {
+  roomType RoomType @default(MANUAL)
   id String @id @db.Uuid
   roomId String @db.Uuid
   roomName String @db.VarChar(48)
@@ -57,6 +63,9 @@ model Match {
   @@index([status, endedAt])
 }
 model MatchParticipant {
+  ratingBefore Int?
+  ratingAfter Int?
+  ratingDelta Int?
   id String @id @default(uuid()) @db.Uuid
   matchId String @db.Uuid
   participantKey String @db.Uuid

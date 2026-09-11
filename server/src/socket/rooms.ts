@@ -7,20 +7,25 @@ import { RoomError, roomInput, roomSchemas, publicRooms, safeRoom, type RoomServ
 import { GameManager } from "../game/manager.js";
 import type { MatchService } from "../services/matches.js";
 import { retryLifecycle } from "../services/match-finalization.js";
+import { createMatchmakingService } from "../matchmaking/service.js";
+import { z as schema } from "zod";
 import { logger } from "../utils/logger.js";
 type LobbySocket = Socket<ClientToServerEvents,ServerToClientEvents,Record<string,never>,SocketData>;
 type LobbyServer = Server<ClientToServerEvents,ServerToClientEvents,Record<string,never>,SocketData>;
 export function configureLobby(io: LobbyServer, auth: AuthService, rooms?: RoomService, graceMs = 5000, tickRate = 20, matches?: MatchService, durationSeconds = 180) {
+ const settling=new Map<string,number>();
+ const matchmaking=rooms&&matches?createMatchmakingService(rooms,id=>{if(settling.has(id))throw new RoomError("NOT_WAITING","Your previous results are still saving. Try again shortly.");for(const game of games.games.values())if(game.roomType==="MATCHMAKING"&&game.participants.has(id)&&!game.result)throw new RoomError("NOT_WAITING","Your previous match is still active. Wait for it to finish before searching again.");return matches.rating(id);}):undefined;
  const jobs = new Set<Promise<void>>();
  if(matches)rooms?.setLauncher(room=>matches.start(room));
  const broadcast = (snapshot: import("@arena/shared").GameSnapshot) => io.to(`lobby:room:${snapshot.roomId}`).emit("game:state",snapshot);
  const games = new GameManager(tickRate, broadcast, {durationSeconds,onFinish:game=>{
+  for(const p of game.result!.standings)settling.set(p.playerProfileId,(settling.get(p.playerProfileId)??0)+1);
   game.persistence=matches?"SAVING":"SAVED";
   broadcast(game.snapshot());
   const job=(async()=>{
-   const save=matches ? retryLifecycle(()=>matches.finish(game.result!),"match.persist_failed") : Promise.resolve(true);
+   const save=matches ? retryLifecycle(async()=>{game.persistedResult=await matches.finish(game.result!);},"match.persist_failed") : Promise.resolve(true);
    const metadata=rooms ? retryLifecycle(()=>rooms.finish(game.roomId,game.gameId),"match.room_finish_failed") : Promise.resolve(true);
-   const [saved]=await Promise.all([save,metadata]);game.persistence=saved?"SAVED":"FAILED";if(games.games.get(game.gameId)===game)broadcast(game.snapshot());
+   const [saved]=await Promise.all([save,metadata]);for(const p of game.result!.standings){const count=(settling.get(p.playerProfileId)??1)-1;if(count)settling.set(p.playerProfileId,count);else settling.delete(p.playerProfileId);}game.persistence=saved?"SAVED":"FAILED";if(games.games.get(game.gameId)===game)broadcast(game.snapshot());
   })();jobs.add(job);void job.finally(()=>jobs.delete(job));
  }});
  games.start();
@@ -39,6 +44,7 @@ export function configureLobby(io: LobbyServer, auth: AuthService, rooms?: RoomS
    else socket.emit("room:state",null);
   }
   games.reconcileRooms(state);
+  for(const [id,socket]of controllers)if(socket.connected&&matchmaking)socket.emit("matchmaking:state",matchmaking.view(state,id));
   for (const room of Object.values(state.rooms)) io.to(`lobby:room:${room.id}`).emit("room:state",safeRoom(room));
   for(const [id,socket] of controllers) {const snapshot=games.sync(id);if(socket.connected && snapshot?.match.status==="FINISHED")socket.emit("game:state",snapshot);}
   io.emit("rooms:list",publicRooms(state));
@@ -53,6 +59,7 @@ export function configureLobby(io: LobbyServer, auth: AuthService, rooms?: RoomS
   if (previous && previous !== socket) { previous.emit("lobby:replaced"); previous.disconnect(true); }
   const active = () => socket.connected && controllers.get(id) === socket;
   if (rooms) void rooms.connection(id,true,active).catch(() => { if (active()) { socket.emit("room:state",null); socket.emit("rooms:list",[]); } });
+  if(matchmaking)void matchmaking.connection(id,true,active).catch(()=>socket.emit("matchmaking:state",{status:"UNAVAILABLE",serverTime:Date.now()}));
   let pending = 0;
   function command<T,R>(schema: z.ZodType<T>, action: (service: RoomService, payload: T) => Promise<R>, create = false) {
    return (payload: T, ack: Ack<R>) => {
@@ -79,6 +86,13 @@ export function configureLobby(io: LobbyServer, auth: AuthService, rooms?: RoomS
     })();
    };
   }
+  const mm=()=>{if(!matchmaking)throw new RoomError('UNAVAILABLE','Matchmaking is temporarily unavailable.');return matchmaking;};
+  socket.on('matchmaking:join',command(roomSchemas.empty,()=>mm().join(socket.data,active)));
+  socket.on('matchmaking:cancel',command(roomSchemas.empty,()=>mm().cancel(id,active)));
+  socket.on('matchmaking:sync',command(roomSchemas.empty,()=>mm().sync(id,active)));
+  const proposal=schema.strictObject({proposalId:schema.string().uuid()});
+  socket.on('matchmaking:accept',command(proposal,(_service,p)=>mm().respond(id,p.proposalId,true,active)));
+  socket.on('matchmaking:decline',command(proposal,(_service,p)=>mm().respond(id,p.proposalId,false,active)));
   let inputWindow = performance.now(), inputCount = 0, lastError = -Infinity;
   socket.on("game:input", payload => {
    if (!active()) return;
@@ -116,16 +130,18 @@ export function configureLobby(io: LobbyServer, auth: AuthService, rooms?: RoomS
   socket.on("room:join-code",command(roomSchemas.code,(service,input) => service.joinCode(socket.data,input.code,active)));
   socket.on("room:leave",command(roomSchemas.empty,service => service.leave(id,active)));
   socket.on("room:set-ready",command(roomSchemas.ready,(service,input) => service.ready(id,input.ready,active)));
-  socket.on("room:return",command(roomSchemas.empty,service=>service.returnToLobby(id,active)));
+  socket.on("room:return",command(roomSchemas.empty,async service=>{const room=await service.sync(id,active);if(room?.roomType==="MATCHMAKING"&&room.status==="FINISHED"){await service.leave(id,active);return room;}return service.returnToLobby(id,active);}));
   socket.on("room:start",command(roomSchemas.empty,service => service.start(id,active)));
   socket.on("disconnect",reason => {
    if (controllers.get(id) !== socket) return;
    games.freeze(id);
    if (reason === "server shutting down") { controllers.delete(id); return; }
+   if(matchmaking)void matchmaking.connection(id,false).catch(()=>logger.warn("matchmaking.disconnect_failed"));
    const stillDeparted = () => controllers.get(id) === socket && !socket.connected;
    const leave = () => {
     departures.delete(id);
     games.remove(id);
+    if(matchmaking&&(reason==="client namespace disconnect"||reason==="server namespace disconnect"))void matchmaking.cancel(id,stillDeparted).catch(()=>logger.warn("matchmaking.cleanup_failed"));
     void rooms?.leave(id,stillDeparted).catch(() => { if (!closing) logger.warn("lobby.disconnect_cleanup_failed"); }).finally(() => { if (stillDeparted()) controllers.delete(id); });
     if (!rooms) controllers.delete(id);
    };
@@ -137,7 +153,7 @@ export function configureLobby(io: LobbyServer, auth: AuthService, rooms?: RoomS
   });
  });
  return async () => {
-  closing = true; games.close();
+  closing = true; matchmaking?.close(); games.close();
   clearInterval(limiterCleanup); for (const timer of departures.values()) clearTimeout(timer); departures.clear(); controllers.clear();
   await Promise.allSettled(jobs);
   await rooms?.close();

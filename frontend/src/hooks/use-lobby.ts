@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import type { CreateRoomInput, PublicRoom, RoomState, Result } from "@arena/shared";
+import type { MatchmakingState, CreateRoomInput, PublicRoom, RoomState, Result } from "@arena/shared";
 import { ArenaNetwork } from "@/game/network";
 import { createArenaSocket, type ArenaSocket } from "@/services/socket";
 import { useAuth } from "@/components/auth-provider";
@@ -9,6 +9,7 @@ export function useLobby() {
  const playerId = player?.profile.id;
  const socketRef = useRef<ArenaSocket | null>(null);
  const networkRef = useRef<ArenaNetwork | null>(null);
+ const [matchmaking,setMatchmaking]=useState<MatchmakingState>({status:"IDLE",serverTime:0});
  const [network, setNetwork] = useState<ArenaNetwork | null>(null);
  const [connection, setConnection] = useState("Connecting");
  const [room, setRoom] = useState<RoomState | null>(null);
@@ -29,9 +30,11 @@ export function useLobby() {
    if (networkRef.current?.latest.gameId === snapshot.gameId) networkRef.current.accept(snapshot);
    else { const next = new ArenaNetwork(socket, playerId, snapshot); networkRef.current = next; setNetwork(next); }
   });
+  socket.on("matchmaking:state",setMatchmaking);
   socket.on("game:error", event => setError(event.message));
   socket.on("connect", () => {
    ping();
+   socket.timeout(5000).emit("matchmaking:sync",{},(timeout,result)=>{if(!timeout&&result.ok)setMatchmaking(result.data);else setMatchmaking({status:"UNAVAILABLE",serverTime:Date.now()});});
    setConnection("Connected"); setError("");
    socket.timeout(5000).emit("room:sync",{},(timeout,result) => {
     if (socketRef.current !== socket || !socket.connected) return;
@@ -61,6 +64,11 @@ export function useLobby() {
   finally { if (socketRef.current === socket) setBusy(false); }
  }
  return {
+  matchmaking,
+  findMatch:()=>run(socket=>socket.timeout(5000).emitWithAck('matchmaking:join',{})),
+  cancelSearch:()=>run(socket=>socket.timeout(5000).emitWithAck('matchmaking:cancel',{})),
+  acceptMatch:()=>run(socket=>socket.timeout(5000).emitWithAck('matchmaking:accept',{proposalId:matchmaking.proposalId!})),
+  declineMatch:()=>run(socket=>socket.timeout(5000).emitWithAck('matchmaking:decline',{proposalId:matchmaking.proposalId!})),
   network, connection, room, rooms, error, notice, busy,
   reconnect: () => { setError(""); setConnection("Connecting"); socketRef.current?.connect(); },
   create: (input: CreateRoomInput) => run(socket => socket.timeout(5000).emitWithAck("room:create",input)),
@@ -68,7 +76,7 @@ export function useLobby() {
   joinCode: (code: string) => run(socket => socket.timeout(5000).emitWithAck("room:join-code",{code})),
   leave: () => run(socket => socket.timeout(5000).emitWithAck("game:leave",{})),
   ready: (ready: boolean) => run(socket => socket.timeout(5000).emitWithAck("room:set-ready",{ready})),
-  returnToLobby: () => run(socket=>socket.timeout(5000).emitWithAck("room:return",{})),
+  returnToLobby: async () => { await run(socket=>socket.timeout(5000).emitWithAck("room:return",{})); await refresh(); },
   start: () => run(socket => socket.timeout(5000).emitWithAck("room:start",{})),
   refreshRooms: () => run(socket => socket.timeout(5000).emitWithAck("rooms:list",{})),
  };

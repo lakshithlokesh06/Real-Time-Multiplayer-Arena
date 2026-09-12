@@ -2,9 +2,9 @@
 
 A full-stack real-time multiplayer 2D arena game built with **Next.js, Phaser, Node.js, Express, Socket.IO, PostgreSQL, Prisma, and Redis**.
 
-The project features secure player authentication, multiplayer rooms, server-authoritative movement and combat, complete match lifecycle management, persistent match results, automated matchmaking, and an Elo-based MMR system.
+The project features secure authentication, multiplayer rooms, server-authoritative movement and combat, complete match lifecycle management, automated matchmaking, Elo-based MMR, persistent player statistics, ranked divisions, leaderboards, match history, and competitive player profiles.
 
-Players can create or join manual rooms or use automated matchmaking to find a similarly rated opponent, enter the arena, compete in real time, view match results, track match history, and receive persistent MMR updates.
+Players can create or join manual rooms for unrated matches or use automated matchmaking to find similarly rated opponents and compete in ranked 1v1 matches.
 
 ---
 
@@ -20,7 +20,7 @@ Players can create or join manual rooms or use automated matchmaking to find a s
 - Session expiration and rotation
 - Logout and session revocation
 - Protected frontend routes
-- Editable player display names
+- Editable display names
 - Authenticated Socket.IO connections
 - Server-resolved player identity
 - Newest-tab controller enforcement
@@ -29,89 +29,99 @@ Players can create or join manual rooms or use automated matchmaking to find a s
 
 ### Multiplayer Rooms & Lobby
 
-- Create public rooms
-- Create private rooms
-- Join private rooms using room codes
-- Browse available public rooms
+- Public room creation
+- Private rooms with room codes
+- Public room browser
 - Configurable room capacity
 - One active room per player
 - Live room roster
 - Player readiness
-- Host ownership
-- Automatic host transfer
-- Room cleanup
+- Host ownership and transfer
 - Redis-backed room state
 - Five-second reconnect grace period
 - Refresh recovery
 - Explicit leave handling
-- Responsive lobby interface
+- Responsive lobby UI
 
-Manual rooms remain fully supported alongside automated matchmaking.
+Manual rooms coexist with automated matchmaking and remain unrated.
 
 ---
 
-### Real-Time Arena
+## Real-Time Arena
 
-- Phaser-powered 2D arena
-- 1600 × 900 world
-- Distinct player spawn positions
+The arena uses Phaser for rendering while the server remains authoritative over gameplay.
+
+### Arena
+
+- 1600 × 900 game world
+- Distinct spawn positions
 - Smooth bounded camera
 - Player labels
 - Keyboard movement
 - Normalized diagonal movement
-- Movement speed of 260 units/second
-- Server-authoritative simulation
-- 20 Hz game simulation
-- 10 Hz authoritative snapshots
+- 260 units/second movement speed
+
+### Simulation
+
+```text
+Server Simulation: 20 Hz
+Snapshots:         10 Hz
+Interpolation:     120 ms
+```
+
+The server does not perform database or Redis writes every simulation tick.
 
 ---
 
-### Multiplayer Networking
+## Multiplayer Networking
 
-- Server-authoritative player state
-- Intent-only client movement input
+Networking includes:
+
+- Intent-only player inputs
+- Server-authoritative movement
 - Input sequence numbers
 - Server acknowledgements
-- Local player prediction
+- Local prediction
 - Authoritative reconciliation
 - Pending-input replay
 - Remote-player interpolation
-- 120 ms interpolation buffer
 - Input validation
-- Connection-state handling
+- Connection-state recovery
 - Refresh recovery
 - Newest-tab controller policy
 
 ---
 
-### Server-Authoritative Combat
+# Server-Authoritative Combat
 
-Players use a basic **Blaster** weapon.
+Players currently use a basic **Blaster** weapon.
 
-Combat configuration:
+### Combat Configuration
 
-- 100 player health
-- 25 projectile damage
-- 800 units/second projectile speed
-- 300 ms fire cooldown
-- 2-second projectile lifetime
-- 3-second respawn delay
+```text
+Health:              100
+Projectile Damage:   25
+Projectile Speed:    800 units/sec
+Fire Cooldown:       300 ms
+Projectile Lifetime: 2 seconds
+Respawn Delay:       3 seconds
+```
 
-Combat features:
+### Combat Features
 
-- Server-authoritative projectile creation
+- Server-authoritative projectiles
 - Server-authoritative hit detection
 - Swept projectile collision
 - No self-damage
 - Authoritative health
 - Eliminations
 - Death tracking
-- Live score tracking
+- Score tracking
 - Projectile cleanup
-- Hit feedback
 - Health bars
+- Hit feedback
 - Respawn indicators
-- Deterministic safe respawning
+- Safe deterministic respawning
 - Safest-of-nine spawn selection
 - Stale-input protection after respawn
 
@@ -119,9 +129,9 @@ Disconnected players remain frozen and damageable during the reconnect grace per
 
 ---
 
-## Match System
+# Match Lifecycle
 
-The game supports a complete authoritative match lifecycle:
+The authoritative match lifecycle is:
 
 ```text
 WAITING
@@ -135,26 +145,6 @@ FINISHED
 WAITING
 ```
 
-### Match Configuration
-
-Default match duration:
-
-```text
-180 seconds
-```
-
-The duration can be configured using:
-
-```env
-MATCH_DURATION_SECONDS=180
-```
-
-Accepted range:
-
-```text
-5–3600 seconds
-```
-
 The server owns:
 
 - Match ID
@@ -165,82 +155,93 @@ The server owns:
 - Eliminations
 - Deaths
 - Match completion
-- Final standings
+- Standings
 - Winner determination
-
-Clients cannot manipulate match results.
+- Persistent results
 
 ---
 
-## Scoring & Win Conditions
+## Match Duration
 
-Current scoring rule:
+Default:
+
+```text
+180 seconds
+```
+
+Configurable through:
+
+```env
+MATCH_DURATION_SECONDS=180
+```
+
+Supported range:
+
+```text
+5–3600 seconds
+```
+
+---
+
+# Scoring & Results
+
+Current scoring:
 
 ```text
 1 elimination = 1 point
 ```
 
-Matches end when the authoritative match timer expires.
+When time expires:
 
-When a match finishes:
-
-- Movement is frozen
-- Combat input is rejected
-- Projectile creation stops
+- Movement freezes
+- Combat stops
+- New projectiles are rejected
 - Existing projectiles are removed
 - Damage stops
 - Respawning stops
-- Scores are frozen
-- Final standings are calculated
+- Scores freeze
+- Final standings are generated
 - Results are persisted
-- Players receive the authoritative results screen
 
-### Standings
-
-Final standings are ordered by:
+### Standings Order
 
 1. Higher score
 2. Higher eliminations
 3. Fewer deaths
-4. Stable player-profile ID
+4. Stable profile ID
 
-Players tied on meaningful gameplay statistics can share winner status while deterministic ordering is retained for display and persistence.
+Meaningful gameplay ties can share winner status while retaining deterministic ordering.
 
 ---
 
-## Match Results
+# Match Results & Rematches
 
-At the end of a match, players receive a responsive results experience showing:
+Results display:
 
-- Match result
-- Winner
+- Winner/result
 - Placement
-- Player standings
 - Score
 - Eliminations
 - Deaths
 - Match duration
-- MMR change for rated matches
+- Rated/unrated status
+- MMR change for ranked matches
 
-Players can then return to the lobby.
-
-Ready states and gameplay state are reset before another match.
-
-A rematch creates:
+Rematches receive:
 
 - New match ID
-- Fresh health
+- Full health
 - Zero score
 - Zero eliminations
 - Zero deaths
 - Fresh projectile state
-- New persistent match record
+- New persistent match result
 
 ---
 
 # Automated Matchmaking
 
-Players can use **Find Match** instead of manually creating or joining a room.
+Players can choose **Find Match** instead of creating or joining a manual room.
 
 The matchmaking lifecycle is:
 
@@ -262,69 +263,57 @@ IN_GAME
 FINISHED
 ```
 
-Automatic matchmaking currently creates **1v1 matches**.
+Automated matchmaking currently supports:
+
+```text
+1v1 Ranked Matches
+```
 
 ---
 
 ## Matchmaking Queue
 
-The live matchmaking queue is managed using Redis.
+Redis manages the live matchmaking state.
 
 Features include:
 
 - Server-authoritative queue membership
 - Duplicate queue prevention
-- Queue cancellation
-- Deterministic queue ordering
+- Idempotent cancellation
 - Oldest-compatible-player priority
-- Atomic matchmaking operations
+- MMR compatibility
+- Expanding search ranges
+- Atomic queue operations
+- Proposal recovery
 - Stale-entry cleanup
-- Duplicate-assignment prevention
+- Duplicate-assignment protection
+- Disconnect recovery
 - Refresh recovery
-- Disconnect handling
-- Newest-controller enforcement
-- Manual-room conflict prevention
 - Rated-match overlap protection
+- Manual-room conflict prevention
 
-The matchmaking service runs a controlled matching cycle approximately once per second.
-
-Automatic matchmaking rooms:
-
-- Have two-player capacity
-- Are created server-side
-- Are separate from manual rooms
-- Are excluded from normal public-room discovery
-- Do not require a room code
-- Do not require a player to manually press Start
+The matchmaking service evaluates the queue approximately once per second.
 
 ---
 
-## MMR-Based Opponent Search
+## MMR Search Expansion
 
-Every player begins with:
+Players initially search for similarly rated opponents.
 
-```text
-MMR: 1000
-```
-
-Matchmaking initially searches for opponents within a narrow rating range.
-
-The range expands as queue time increases:
-
-| Queue Time | Allowed Rating Difference |
+| Queue Time | Rating Difference |
 |---|---:|
-| 0–10 seconds | ±100 |
-| 10–20 seconds | ±200 |
-| 20–30 seconds | ±300 |
-| 30+ seconds | Unrestricted |
+| 0–10 sec | ±100 |
+| 10–20 sec | ±200 |
+| 20–30 sec | ±300 |
+| 30+ sec | Unrestricted |
 
-This allows similarly rated players to be prioritized without leaving players stuck in the queue indefinitely.
+This prioritizes balanced matches while preventing excessively long queue times.
 
 ---
 
-## Match Found & Acceptance
+# Match Found
 
-When two compatible players are selected, both receive a **Match Found** state.
+Once two compatible players are selected, both receive a Match Found proposal.
 
 Acceptance deadline:
 
@@ -332,12 +321,7 @@ Acceptance deadline:
 10 seconds
 ```
 
-Each player can:
-
-- Accept
-- Decline
-
-If both accept:
+Flow:
 
 ```text
 Match Found
@@ -353,70 +337,88 @@ STARTING
 IN_GAME
 ```
 
-No manual host action is required.
+Matchmaking rooms:
 
-If one player declines or times out, the connected player who already accepted is returned to matchmaking while preserving reasonable queue priority.
-
-A **15-second pair cooldown** prevents the same unsuccessful pairing from immediately repeating.
+- Have capacity 2
+- Are created server-side
+- Are excluded from the public room browser
+- Do not use manual room codes
+- Do not require host Start
+- Automatically enter the game pipeline
 
 ---
 
-## Matchmaking Recovery
+## Decline & Timeout
 
-### Queue Disconnect
+If a player declines or does not respond before the deadline:
 
-Queued players receive a five-second reconnect grace period.
+- The proposal is cancelled
+- A connected opponent who already accepted can return to the queue
+- Original queue priority is preserved where appropriate
+- No MMR penalty occurs
 
-Reconnecting within the grace period restores the existing queue state.
+A:
+
+```text
+15-second pair cooldown
+```
+
+prevents the same unsuccessful pairing from immediately repeating.
+
+---
+
+# Matchmaking Recovery
 
 ### Queue Refresh
 
-Refreshing while searching restores:
+Refreshing while queued restores:
 
 - Queue membership
-- Original queue time
-- Current search state
+- Queue priority
+- Search state
 - Cancel Search control
 
 ### Match Found Refresh
 
-Refreshing during the acceptance phase restores:
+Refreshing during acceptance restores:
 
 - Match proposal
-- Acceptance state
+- Acceptance status
 - Remaining authoritative deadline
 
-### Active Match Refresh
+### Disconnect
 
-Once assigned to a game, the existing authoritative gameplay recovery system takes over.
+Queued players receive a five-second reconnect grace period.
+
+### Active Match
+
+Once assigned, the existing gameplay reconnect/recovery system handles the player.
 
 ---
 
-# Elo Rating System
+# Elo MMR System
 
-Automated matchmaking matches are rated using an Elo-based MMR system.
-
-Manual public/private room matches remain **unrated**.
-
-### Initial Rating
+Every player begins with:
 
 ```text
-1000
+MMR: 1000
 ```
+
+Rated matchmaking uses Elo.
 
 ### K-Factor
 
 ```text
-32
+K = 32
 ```
 
-Expected score:
+### Expected Score
 
 ```text
 E = 1 / (1 + 10^((OpponentRating - PlayerRating) / 400))
 ```
 
-Updated rating:
+### Rating Update
 
 ```text
 NewRating = Rating + K × (ActualScore - ExpectedScore)
@@ -430,47 +432,339 @@ Tie  = 0.5
 Loss = 0.0
 ```
 
-Ratings are deterministically rounded to integers.
+Ratings use deterministic integer rounding.
 
-For an evenly rated match such as:
-
-```text
-1000 vs 1000
-```
-
-a normal win/loss produces approximately:
+For two players at 1000 MMR:
 
 ```text
-Winner: +16
-Loser:  -16
+Winner: approximately +16
+Loser:  approximately -16
 ```
 
 ---
 
-## Rating Integrity
+# Rated vs Unrated Matches
 
-Rating calculations are entirely server-side.
+The game deliberately separates competitive and casual play.
 
-Clients cannot submit:
+### Automated Matchmaking
 
+```text
+RATED
+```
+
+Affects:
+
+- MMR
+- Ranked wins/losses/ties
+- Peak MMR
+- Win streaks
+- Ranked statistics
+- Division
+- Leaderboard position
+- Recent competitive form
+
+### Manual Rooms
+
+```text
+UNRATED
+```
+
+Manual matches can affect appropriate overall/unrated career totals but do not affect:
+
+- MMR
+- Ranked wins
+- Ranked losses
+- Ranked ties
+- Ranked division progression
+- Ranked leaderboard progression
+
+Abandoned empty-room matches are excluded from career statistics.
+
+---
+
+# Persistent Player Statistics
+
+Phase 8 introduces persistent competitive statistics through the `PlayerStatistics` model.
+
+The database tracks authoritative career information including:
+
+- Total matches
+- Rated matches
+- Unrated matches
+- Wins
+- Losses
+- Ties
+- Eliminations
+- Deaths
+- Rated wins
+- Rated losses
+- Rated ties
+- Rated eliminations
+- Rated deaths
+- Peak MMR
+- Current win streak
+- Best win streak
+
+Statistics are updated only from authoritative finalized match results.
+
+Clients cannot submit or modify career statistics.
+
+---
+
+## Statistics Integrity
+
+Statistics updates participate in the authoritative match-finalization process.
+
+The design protects against:
+
+- Duplicate finalization
+- Retries
+- Refreshes
+- Reconnects
+- Multiple socket handlers
+- Concurrent persistence attempts
+- Duplicate MMR application
+- Duplicate statistics increments
+
+Rated match finalization coordinates:
+
+```text
+Match Result
+     ↓
+MatchParticipant
+     ↓
+MMR Update
+     ↓
+Player Statistics
+     ↓
+Persistent Finalization
+```
+
+The process is transactional and idempotent.
+
+---
+
+# Ranked Divisions
+
+Players receive a competitive division derived directly from current MMR.
+
+| Division | MMR |
+|---|---:|
+| Bronze | < 900 |
+| Silver | 900–1099 |
+| Gold | 1100–1299 |
+| Platinum | 1300–1499 |
+| Diamond | 1500–1699 |
+| Master | 1700+ |
+
+A new player begins at:
+
+```text
+1000 MMR
+Silver
+```
+
+Division is derived from MMR rather than being independently client-controlled.
+
+---
+
+## Division Progress
+
+Profiles display progress toward the next division.
+
+Example:
+
+```text
+Silver
+MMR 1042
+58 MMR to Gold
+```
+
+Master is currently the highest division and therefore has no artificial next-tier target.
+
+---
+
+# Competitive Metrics
+
+Player profiles expose competitive metrics derived from authoritative statistics.
+
+### Win Rate
+
+Win rate uses rated wins divided by completed rated outcomes.
+
+Ties remain part of the rated-match denominator.
+
+### K/D Ratio
+
+```text
+K/D = Eliminations / Deaths
+```
+
+When deaths are zero, the displayed K/D uses eliminations rather than producing `Infinity` or `NaN`.
+
+### Peak MMR
+
+Peak MMR:
+
+- Records the highest rating achieved
+- Increases when a new rating exceeds the previous peak
+- Never decreases
+
+### Win Streak
+
+Rules:
+
+```text
+Win  → streak + 1
+Loss → streak resets
+Tie  → streak resets
+```
+
+The system stores:
+
+- Current win streak
+- Best win streak
+
+---
+
+# Ranked Leaderboard
+
+The `/leaderboard` route provides the competitive ranking experience.
+
+Players must complete at least:
+
+```text
+1 rated match
+```
+
+before appearing on the ranked leaderboard.
+
+Players without a rated match remain:
+
+```text
+Unranked
+```
+
+---
+
+## Leaderboard Ordering
+
+Players are ranked by:
+
+1. Higher MMR
+2. More rated wins
+3. Better win rate
+4. Stable profile ID
+
+This guarantees deterministic ordering.
+
+---
+
+## Leaderboard Information
+
+The leaderboard displays safe public competitive information such as:
+
+- Rank
+- Player
+- Division
+- MMR
+- Wins
+- Losses
+- Win rate
+- K/D
+
+Private account information is never exposed.
+
+The logged-in player's position is highlighted.
+
+---
+
+## Leaderboard Pagination
+
+Authenticated endpoint:
+
+```http
+GET /api/leaderboard
+```
+
+Pagination:
+
+```http
+GET /api/leaderboard?page=1&limit=25
+```
+
+Defaults:
+
+```text
+Default page size: 25
+Maximum page size: 50
+```
+
+The API also exposes the authenticated player's personal rank even when they are outside the currently displayed page.
+
+---
+
+# Recent Competitive Form
+
+The player experience displays the five most recent completed rated matches.
+
+Example:
+
+```text
+W  W  L  W  T
+```
+
+Where:
+
+```text
+W = Win
+L = Loss
+T = Tie
+```
+
+Recent form is derived from existing match-participant history rather than maintained in a separate database table.
+
+Players with no rated matches receive an appropriate unranked/empty state.
+
+---
+
+# Competitive Profile
+
+The player profile now provides a competitive summary including:
+
+- Display name
+- Division
 - Current MMR
-- Previous MMR
-- New MMR
-- Rating delta
-- Expected score
-- Match outcome
-- Placement
-- Winner status
+- Peak MMR
+- Leaderboard rank
+- Rated matches
+- Wins
+- Losses
+- Ties
+- Win rate
+- Eliminations
+- Deaths
+- K/D ratio
+- Current win streak
+- Best win streak
+- Recent W/L/T form
+- Division progress
 
-For rated matches, participant records preserve:
+---
 
-- Rating before
-- Rating after
-- Rating delta
+# Dashboard
 
-MMR updates and match finalization are performed atomically and idempotently so a retry cannot apply the same rating change twice.
+The dashboard provides a compact competitive overview including:
 
-Manual matches do not alter MMR.
+- Current division
+- Current MMR
+- Leaderboard rank
+- Recent competitive form
+- Latest rated match
+- Competitive statistics
+
+The full profile remains available for deeper player statistics.
 
 ---
 
@@ -478,7 +772,7 @@ Manual matches do not alter MMR.
 
 Completed matches are stored in PostgreSQL.
 
-The persistent match system records information such as:
+Match records preserve information such as:
 
 - Match ID
 - Match origin/type
@@ -495,72 +789,66 @@ The persistent match system records information such as:
 - Rating after
 - Rating delta
 
-Match persistence occurs at lifecycle boundaries rather than during simulation ticks.
+History distinguishes:
 
----
+```text
+Rated
+Unrated
+```
 
-## Match History
+matches.
 
-Authenticated players can view their recent matches through the match-history experience.
-
-Match history includes:
-
-- Date/time
-- Match result
-- Placement
-- Score
-- Eliminations
-- Deaths
-- Duration
-- MMR changes for rated matches
-
-The dashboard also exposes recent-match information.
+Historical match results created before the Phase 8 statistics system are not automatically backfilled into career counters.
 
 ---
 
 # Architecture
 
 ```text
-┌───────────────────────────────┐
-│        Next.js Frontend       │
-│                               │
-│ Lobby / Matchmaking / HUD     │
-│ Phaser / Results / History    │
-└───────────────┬───────────────┘
-                │
-          HTTP + Socket.IO
-                │
-┌───────────────▼───────────────┐
-│       Express Game Server     │
-│                               │
-│ Authentication                │
-│ Room Management               │
-│ Matchmaking Service           │
-│ GameManager                   │
-│ GameInstance                  │
-│ Combat Simulation             │
-│ Match Lifecycle               │
-│ Elo / MMR                     │
-└──────────┬────────────┬───────┘
-           │            │
-           │            │
-┌──────────▼──────┐ ┌───▼──────────────┐
-│   PostgreSQL    │ │      Redis       │
-│                 │ │                  │
-│ Users           │ │ Rooms            │
-│ Profiles        │ │ Membership       │
-│ Sessions        │ │ Readiness        │
-│ Matches         │ │ Queue            │
-│ Participants    │ │ Proposals        │
-│ MMR             │ │ Matchmaking      │
-└─────────────────┘ └──────────────────┘
+┌─────────────────────────────────┐
+│          Next.js Client         │
+│                                 │
+│ Lobby / Matchmaking / Profile   │
+│ Leaderboard / Phaser / Results  │
+└────────────────┬────────────────┘
+                 │
+           HTTP + Socket.IO
+                 │
+┌────────────────▼────────────────┐
+│       Express Game Server       │
+│                                 │
+│ Authentication                  │
+│ Room Management                 │
+│ Matchmaking Service             │
+│ GameManager / GameInstance      │
+│ Combat Simulation               │
+│ Match Lifecycle                 │
+│ Match Finalization              │
+│ Elo / MMR                       │
+│ Statistics                      │
+│ Ranked Divisions                │
+│ Leaderboard                     │
+└────────────┬───────────┬────────┘
+             │           │
+             │           │
+┌────────────▼──────┐ ┌──▼───────────────┐
+│    PostgreSQL     │ │      Redis       │
+│                   │ │                  │
+│ Users             │ │ Rooms            │
+│ Profiles          │ │ Membership       │
+│ Sessions          │ │ Readiness        │
+│ Matches           │ │ Queue            │
+│ Participants      │ │ Proposals        │
+│ MMR               │ │ Matchmaking      │
+│ PlayerStatistics  │ │ Ephemeral State  │
+└───────────────────┘ └──────────────────┘
 ```
 
 ---
 
-## Server Authority
+# Server Authority
 
-The server is authoritative for:
+The server remains authoritative over:
 
 - Authentication
 - Player identity
@@ -570,9 +858,9 @@ The server is authoritative for:
 - Opponent selection
 - Acceptance deadlines
 - Match assignment
-- Match IDs
 - Movement
 - Position
+- Combat
 - Projectiles
 - Hit detection
 - Health
@@ -582,19 +870,15 @@ The server is authoritative for:
 - Match timing
 - Scores
 - Standings
-- Match results
+- Results
 - MMR
-- Rating changes
+- Career statistics
+- Ranked statistics
+- Divisions
+- Leaderboard ordering
+- Competitive rank
 
-The client primarily handles:
-
-- Input collection
-- Local movement prediction
-- Reconciliation
-- Remote interpolation
-- Phaser rendering
-- UI presentation
-- Smooth timer presentation
+The client handles presentation, input collection, prediction, reconciliation, interpolation, and UI.
 
 ---
 
@@ -604,27 +888,32 @@ Implemented protections include:
 
 - Argon2id password hashing
 - Opaque session tokens
-- SHA-256 session-token hashes
+- SHA-256 token hashing
 - HTTP-only cookies
+- Session expiration
 - Session rotation
 - Session revocation
 - Credentialed CORS
 - CSRF protection
 - Request-size limits
 - Rate limiting
-- Input validation
+- Runtime input validation
 - Authenticated Socket.IO
-- Server-resolved identity
+- Server-resolved player identity
 - Server-authoritative movement
 - Server-authoritative combat
 - Server-authoritative scoring
 - Server-authoritative matchmaking
 - Server-authoritative MMR
+- Server-authoritative statistics
 - Newest-tab controller enforcement
-- Duplicate-assignment protection
+- Duplicate assignment protection
 - Rated-match overlap protection
-- Idempotent result persistence
-- Atomic rating updates
+- Atomic result persistence
+- Idempotent statistics updates
+- Atomic MMR updates
+- Safe leaderboard fields
+- Pagination validation
 
 ---
 
@@ -659,7 +948,7 @@ Implemented protections include:
 - SHA-256 session hashing
 - CSRF protection
 - Rate limiting
-- Runtime input validation
+- Runtime validation
 
 ---
 
@@ -709,7 +998,7 @@ Install:
 docker compose up -d --wait
 ```
 
-The development infrastructure uses:
+Development services:
 
 ```text
 PostgreSQL: 5433
@@ -718,13 +1007,15 @@ Redis:      6380
 
 ---
 
-## Apply Database Migrations
+## Database
+
+Apply migrations:
 
 ```bash
 npm run db:migrate -w server
 ```
 
-Generate the Prisma client:
+Generate Prisma client:
 
 ```bash
 npm run db:generate -w server
@@ -744,7 +1035,7 @@ Backend:
 http://localhost:4000
 ```
 
-Health endpoint:
+Health:
 
 ```text
 GET /api/health
@@ -768,100 +1059,201 @@ http://localhost:3000
 
 ---
 
-# Testing & Verification
+# Database Migrations
 
-The project currently has:
+Phase 8 added:
 
 ```text
-197 passing tests
+20260912050000_player_statistics
+```
+
+The migration introduces persistent player statistics while preserving existing development data.
+
+Existing users receive safe default statistics.
+
+---
+
+# Testing & Verification
+
+Current test suite:
+
+```text
+233 passing tests
 ```
 
 Breakdown:
 
 ```text
-185 backend tests
-12 shared/networking tests
+221 backend
+12 shared/networking
 ```
 
-The test suite covers functionality including:
+No failures or skipped tests were reported during Phase 8 verification.
+
+---
+
+## Phase 8 Test Coverage
+
+Coverage includes:
+
+### Authentication & Rooms
 
 - Authentication
 - Sessions
 - Profiles
 - Socket authentication
-- Room creation/joining
 - Public/private rooms
 - Host transfer
 - Readiness
-- Reconnect grace
+- Reconnect recovery
+
+### Gameplay
+
 - Movement
-- Prediction/reconciliation
+- Prediction
+- Reconciliation
 - Combat
-- Projectile collision
+- Projectiles
 - Damage
 - Eliminations
+- Deaths
 - Respawning
 - Match lifecycle
 - Match timing
 - Scoring
 - Results
-- Match persistence
-- Match history
 - Rematches
-- Matchmaking queues
+
+### Matchmaking
+
+- Queue membership
+- Queue cancellation
 - Queue priority
-- MMR range expansion
+- MMR compatibility
+- Expanding MMR ranges
 - Match proposals
 - Accept/decline
 - Acceptance timeout
 - Automatic room assignment
-- Matchmaking recovery
+- Refresh recovery
 - Queue concurrency
 - Duplicate-assignment prevention
+- Redis protection
+
+### MMR
+
 - Elo calculations
-- Atomic MMR persistence
-- Manual-match rating isolation
-- Redis data-loss protection
-- Multiple-tab controller enforcement
+- Atomic MMR updates
+- Retry safety
+- Manual-match isolation
+- Match history rating changes
 
-Phase 7 verification also passed:
+### Player Statistics
 
-- Prisma validation
-- Prisma migrations
+- Default statistics
+- Rated match counters
+- Unrated match counters
+- Wins
+- Losses
+- Ties
+- Eliminations
+- Deaths
+- Peak MMR
+- Win streaks
+- Best win streak
+- Duplicate-finalization protection
+
+### Divisions
+
+- Bronze boundary
+- Silver boundary
+- Gold boundary
+- Platinum boundary
+- Diamond boundary
+- Master boundary
+- Starting division
+- Division progress
+- Highest-tier behavior
+
+### Leaderboard
+
+- Eligibility
+- MMR ordering
+- Win tie-breakers
+- Win-rate tie-breakers
+- Deterministic ordering
+- Pagination
+- Personal rank
+- Safe public fields
+- Unranked behavior
+
+### Competitive Metrics
+
+- Win rate
+- K/D
+- Zero-death handling
+- Recent form
+- Personal rank
+
+---
+
+# Phase 8 Verification
+
+Phase 8 passed:
+
+- 233 automated tests
+- Prisma schema validation
+- Prisma migration verification
 - Existing database compatibility
 - Frontend lint
 - Server lint
 - TypeScript checks
 - Frontend production build
 - Server production build
-- Two-player automatic-matchmaking browser QA
-- Manual-room/rematch regression QA
-- Refresh/recovery QA
-- Responsive-layout QA
-- Browser console checks
+
+Two-player browser QA also verified:
+
+- Rated matchmaking
+- MMR changes
+- Career statistics
+- Leaderboard ordering
+- Player rank
+- Peak MMR
+- Win streak behavior
+- Recent form
+- Manual-match ranked-stat isolation
+- Rated/unrated history
+- Desktop layout
+- Tablet layout
+- Mobile layout
+
+No significant browser console errors were reported.
 
 ---
 
 # Current Limitations
 
-The current implementation intentionally has several limitations:
+The project currently has several intentional limitations:
 
-- Game and matchmaking authority currently assume a single server process
-- Maximum active matchmaking queue is currently bounded at 200 entries
-- Live matches are not durably recoverable after server restart
-- Matchmaking queue/proposals are not designed as durable PostgreSQL state
-- Redis namespace loss requires safe recovery/application restart
-- No global leaderboard yet
-- No ranked divisions or tiers yet
+- Single-process game/matchmaking authority
+- Matchmaking queue currently bounded at 200 players
+- No durable live-match recovery after application restart
+- Matchmaking queue/proposals are ephemeral Redis state
+- Protected Redis namespace loss can require application restart
+- Historical results are not backfilled into Phase 8 career statistics
+- Large-scale leaderboard performance has not yet been benchmarked
 - No seasons
+- No placement matches
+- No MMR resets
+- No sub-divisions
 - No parties
 - No team matchmaking
+- No friends/social system
+- No direct player challenges
 - No spectators
 - No bots
 - No tournaments
 - No production deployment architecture yet
-
-These are planned or intentionally deferred beyond Phase 7.
 
 ---
 
@@ -876,51 +1268,99 @@ These are planned or intentionally deferred beyond Phase 7.
 | Phase 5 | Combat, Health, Eliminations & Respawning | ✅ Complete |
 | Phase 6 | Match Lifecycle, Scoring, Results & Persistence | ✅ Complete |
 | Phase 7 | Automated Matchmaking & MMR | ✅ Complete |
-| Phase 8 | Player Statistics, Rankings & Leaderboards | ⏳ Planned |
-| Phase 9 | Social / Competitive Features | ⏳ Planned |
+| Phase 8 | Player Statistics, Ranked Divisions & Leaderboards | ✅ Complete |
+| Phase 9 | Social & Competitive Player Features | ⏳ Planned |
 | Phase 10 | Production Hardening & Deployment | ⏳ Planned |
 
 ---
 
-# Phase 7 Status
+# Current Competitive Flow
 
-Phase 7 introduced the first complete automated competitive matchmaking flow:
+The complete ranked experience is now:
 
 ```text
+Login
+  ↓
 Find Match
-    ↓
-Searching for Opponent
-    ↓
-MMR Compatibility Search
-    ↓
+  ↓
+MMR-Based Search
+  ↓
 Match Found
-    ↓
+  ↓
 Accept
-    ↓
+  ↓
 Preparing Arena
-    ↓
-Automatic Match
-    ↓
-Results
-    ↓
-Elo / MMR Update
-    ↓
+  ↓
+Ranked 1v1 Match
+  ↓
+Final Results
+  ↓
+Elo Update
+  ↓
+Career Statistics Update
+  ↓
+Division Update
+  ↓
+Leaderboard Rank
+  ↓
 Match History
+  ↓
+Recent Form
+  ↓
+Queue Again
 ```
 
-The project now supports both:
+Manual rooms provide a separate unrated experience:
 
 ```text
-Manual Rooms → Unrated Matches
+Create / Join Room
+       ↓
+Ready
+       ↓
+Manual Match
+       ↓
+Results
+       ↓
+Unrated Career Totals
 ```
 
-and:
+This separation keeps competitive MMR and ranked progression isolated from casual/manual matches.
+
+---
+
+# Phase 8 Status
+
+Phase 8 completes the core competitive progression foundation.
+
+The project now combines:
 
 ```text
-Automated Matchmaking → Rated 1v1 Matches
+Authentication
+      +
+Multiplayer Rooms
+      +
+Server-Authoritative Gameplay
+      +
+Combat
+      +
+Match Lifecycle
+      +
+Persistent Results
+      +
+Automated Matchmaking
+      +
+Elo MMR
+      +
+Career Statistics
+      +
+Ranked Divisions
+      +
+Leaderboards
+      +
+Competitive Profiles
 ```
 
-This provides the foundation for persistent player statistics, ranked progression, divisions, and leaderboards in the next phase.
+This provides the foundation for future social and competitive features without weakening the existing server-authoritative architecture.
 
 ---
 

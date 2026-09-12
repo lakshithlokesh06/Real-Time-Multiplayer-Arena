@@ -19,5 +19,12 @@ test('additive match and rating migrations preserve populated accounts, sessions
  const newMatch=(await db.query('SELECT * FROM "Match"')).rows[0];assert.equal(newMatch.roomType,'MANUAL');delete newMatch.roomType;assert.deepEqual(newMatch,oldMatch);
  const newParticipant=(await db.query('SELECT * FROM "MatchParticipant"')).rows[0];for(const column of ['ratingBefore','ratingAfter','ratingDelta']){assert.equal(newParticipant[column],null);delete newParticipant[column];}assert.deepEqual(newParticipant,oldParticipant);
 
+ const beforeStats=await snapshot();
+ await db.query(await readFile('prisma/migrations/20260912050000_player_statistics/migration.sql','utf8'));
+ assert.deepEqual(await snapshot(),beforeStats);
+ const stats=(await db.query('SELECT * FROM "PlayerStatistics"')).rows[0];
+ assert.equal(stats.playerProfileId,profile);assert.equal(stats.peakMmr,1000);
+ for(const key of ['totalMatches','ratedMatches','unratedMatches','wins','losses','ties','eliminations','deaths','ratedWins','ratedLosses','ratedTies','ratedEliminations','ratedDeaths','currentWinStreak','bestWinStreak'])assert.equal(stats[key],0);
+ assert.equal((await db.query('SELECT count(*) FROM "MatchParticipant"')).rows[0].count,'1');
  }finally{await db.query('SET search_path TO public');await db.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);await db.end();}
 });

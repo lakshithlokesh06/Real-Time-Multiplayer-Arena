@@ -44,3 +44,17 @@ button,input{font:inherit}button{cursor:pointer}button:disabled{opacity:.6;curso
 .matchmaking-panel { border: 1px solid #71864e; background: linear-gradient(115deg,#203126,#101d24); border-radius: 16px; padding: clamp(1.25rem,4vw,2.5rem); margin: 1.5rem 0 2.5rem; }
 .matchmaking-panel h2 { font-size: clamp(1.6rem,4vw,2.8rem); margin: .6rem 0; }
 .rating-change { color: #c4f279; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Competitive progression */
+.competitive-summary {margin:2rem 0;padding:clamp(1rem,3vw,2rem);border:1px solid #343c38;border-radius:16px;background:#121815;}
+.competitive-heading,.leaderboard-summary,.ranking-pagination {display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;}
+.competitive-heading h2 {margin:0 0 1rem;}
+.competitive-grid {display:grid;grid-template-columns:minmax(180px,1fr) 2fr;gap:2rem;align-items:center;}
+.division-progress h3 {font-size:2.5rem;margin:1rem 0;}.division-progress small {font-size:1rem;color:#a5b4ab;}
+.division-progress progress {width:100%;height:8px;accent-color:#c5f567;}.division-progress p {font-size:.875rem;color:#b7c5bd;}
+.competitive-metrics,.ranking-card dl {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;margin:0;}
+.competitive-metrics dt,.ranking-card dt {font-size:.75rem;color:#a5b4ab;}.competitive-metrics dd,.ranking-card dd {margin:.4rem 0 0;font-weight:600;}
+.recent-form {margin-top:1.5rem;}.recent-form h3 {font-size:1rem;}.form-outcome {display:inline-grid;place-items:center;width:36px;height:36px;margin:0 .4rem .4rem 0;border:1px solid #536358;border-radius:6px;font-weight:700;}.outcome-W {color:#c5f567;}.outcome-L {color:#ffb3a9;}
+.leaderboard-summary {padding:1.5rem 0;margin:1rem 0;border-block:1px solid #343c38;}.ranking-list {list-style:none;padding:0;}.ranking-card {display:grid;grid-template-columns:50px minmax(120px,1fr) 2fr;gap:1rem;align-items:center;padding:1.4rem;margin:.75rem 0;border:1px solid #343c38;border-radius:12px;background:#121815;}.ranking-card.is-self {border-color:#c5f567;background:#1a2316;}.rank-number {font-size:1.3rem;color:#c5f567;}.rank-identity {min-width:0;overflow-wrap:anywhere;}.rank-identity h2 {font-size:1rem;margin:0 0 .6rem;}.rank-identity small {font-size:.7rem;color:#c5f567;}.ranking-card dl {grid-template-columns:repeat(6,minmax(0,1fr));}.ranking-pagination {margin:1.5rem 0;}.ranking-pagination button:disabled {opacity:.4;cursor:default;}
+@media(max-width:900px){.ranking-card dl {grid-template-columns:repeat(3,minmax(0,1fr));}}
+@media(max-width:600px){.competitive-grid {grid-template-columns:1fr;gap:1rem;}.competitive-metrics {grid-template-columns:repeat(2,minmax(0,1fr));}.ranking-card {grid-template-columns:40px 1fr;padding:1rem;}.ranking-card dl {grid-column:1/-1;}.ranking-pagination {gap:.5rem;}.ranking-pagination .button {padding:.7rem;}}

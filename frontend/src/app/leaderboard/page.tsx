@@ -1,3 +1,4 @@
-import { PlaceholderPage } from "@/components/placeholder-page";
-export const metadata = { title: "Leaderboard" };
-export default function Page() { return <PlaceholderPage title="Earn your place." description="Rankings will become available after competitive matches and statistics are implemented." />; }
+import {AuthGate} from '@/components/auth-gate';
+import {RankedLeaderboard} from '@/components/ranked-leaderboard';
+export const metadata={title:'Ranked Leaderboard'};
+export default function Page(){return <AuthGate><RankedLeaderboard/></AuthGate>;}

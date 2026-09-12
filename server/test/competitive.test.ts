@@ -1,0 +1,11 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {division,kd,winRate,outcome} from '../src/services/competitive.js';
+for(const [mmr,name] of [[-10,'Bronze'],[899,'Bronze'],[900,'Silver'],[1000,'Silver'],[1099,'Silver'],[1100,'Gold'],[1299,'Gold'],[1300,'Platinum'],[1499,'Platinum'],[1500,'Diamond'],[1699,'Diamond'],[1700,'Master'],[2400,'Master']] as const)test(`division at ${mmr} is ${name}`,()=>assert.equal(division(mmr).name,name));
+test('division progress uses actual next threshold',()=>{assert.equal(division(1042).mmrRequired,58);assert.equal(division(1042).progress,.71);assert.equal(division(1042).nextDivision,'Gold');assert.equal(division(-10).progress,0);});
+test('Master has no fake next division',()=>{assert.equal(division(1700).nextDivision,null);assert.equal(division(1700).nextThreshold,null);assert.equal(division(1700).progress,1);});
+test('win rate includes ties in denominator',()=>assert.equal(winRate(2,5),40));
+test('zero-match win rate is finite zero',()=>assert.equal(winRate(0,0),0));
+test('KD divides eliminations by deaths',()=>assert.equal(kd(7,2),3.5));
+test('zero-death KD is elimination count',()=>{assert.equal(kd(7,0),7);assert.equal(kd(0,0),0);});
+test('tied top standings tie, lower standings lose',()=>{assert.equal(outcome(true,true),'T');assert.equal(outcome(false,true),'L');assert.equal(outcome(true,false),'W');});

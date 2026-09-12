@@ -1,3 +1,4 @@
+import { competitiveRouter } from "./routes/competitive.js";
 import express from "express";
 import cors from "cors";
 import type { Environment } from "./config/env.js";
@@ -19,6 +20,7 @@ export function createApp(config: Environment, auth: AuthService, redisStatus: (
  app.use(express.json({ limit: "16kb" }));
  app.use("/api", healthRouter(config, redisStatus));
  app.use("/api/auth", authRouter(config, auth));
+ if (matches) app.use("/api", competitiveRouter(config,auth,matches));
  if (matches) app.use("/api/matches", matchesRouter(config,auth,matches));
  app.use("/api/profile", profileRouter(config, auth));
  app.use((_request, response) => { response.status(404).json({ error: "Not found" }); });

@@ -47,7 +47,7 @@ export function createAuthService(db: Database, config: Environment) {
    const old = oldToken ? await db.session.findUnique({ where: { tokenHash: hashToken(oldToken) }, select: { id: true } }) : null;
    try {
     const user = await db.$transaction(async tx => {
-     const user = await tx.user.create({ data: { email: data.email, passwordHash, profile: { create: { username: data.username, displayName: data.displayName } }, sessions: { create: { tokenHash: hashToken(token), expiresAt } } }, select: playerSelect });
+     const user = await tx.user.create({ data: { email: data.email, passwordHash, profile: { create: { username: data.username, displayName: data.displayName, statistics: { create: {} } } }, sessions: { create: { tokenHash: hashToken(token), expiresAt } } }, select: playerSelect });
      if (old) await tx.session.deleteMany({ where: { id: old.id } });
      return user;
     });

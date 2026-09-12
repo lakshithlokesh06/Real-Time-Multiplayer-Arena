@@ -16,6 +16,8 @@ model User {
   sessions Session[]
 }
 model PlayerProfile {
+  statistics PlayerStatistics?
+  @@index([rating, id])
   rating Int @default(1000)
   matchParticipations MatchParticipant[]
   wonMatches Match[] @relation("MatchWinner")
@@ -83,4 +85,27 @@ model MatchParticipant {
   player PlayerProfile? @relation(fields: [playerProfileId], references: [id], onDelete: SetNull)
   @@unique([matchId, participantKey])
   @@index([playerProfileId, matchId])
+}
+
+model PlayerStatistics {
+  playerProfileId String @id @db.Uuid
+  player PlayerProfile @relation(fields: [playerProfileId], references: [id], onDelete: Cascade)
+  totalMatches Int @default(0)
+  ratedMatches Int @default(0)
+  unratedMatches Int @default(0)
+  wins Int @default(0)
+  losses Int @default(0)
+  ties Int @default(0)
+  eliminations Int @default(0)
+  deaths Int @default(0)
+  ratedWins Int @default(0)
+  ratedLosses Int @default(0)
+  ratedTies Int @default(0)
+  ratedEliminations Int @default(0)
+  ratedDeaths Int @default(0)
+  currentWinStreak Int @default(0)
+  bestWinStreak Int @default(0)
+  peakMmr Int @default(1000)
+  updatedAt DateTime @updatedAt
+  @@index([ratedMatches])
 }

@@ -1,5 +1,7 @@
 import type { MatchResult, RoomState } from "@arena/shared";
 import type { Database } from "../config/database.js";
+import { createStatisticsService } from "./statistics.js";
+import { outcome } from "./competitive.js";
 import {elo} from "../matchmaking/rating.js";
 import { HttpError } from "../utils/http-error.js";
 const resultSelect = { roomType:true,id:true, roomId:true, roomName:true, startedAt:true, endedAt:true, durationSeconds:true, endReason:true, winnerPlayerProfileId:true, participants: { orderBy: { placement: "asc" as const }, select: { ratingBefore:true,ratingAfter:true,ratingDelta:true,participantKey:true,username:true,displayName:true,score:true,eliminations:true,deaths:true,placement:true,isWinner:true,leftEarly:true } } } as const;
@@ -10,6 +12,7 @@ function safeResult(m: Pick<StoredResult,"roomType"|"id"|"roomId"|"roomName"|"st
 }
 export function createMatchService(db:Database, durationSeconds=180) {
  return {
+  statistics: createStatisticsService(db),
   async rating(id:string){return (await db.playerProfile.findUniqueOrThrow({where:{id},select:{rating:true}})).rating;},
   async start(room:RoomState):Promise<string> {
    if (!room.gameId) throw new Error("Match identity required");
@@ -34,6 +37,24 @@ export function createMatchService(db:Database, durationSeconds=180) {
     for(const p of result.standings) {
      const updated=await tx.matchParticipant.updateMany({where:{matchId:result.matchId,participantKey:p.playerProfileId},data:{score:p.score,eliminations:p.eliminations,deaths:p.deaths,placement:p.placement,isWinner:p.isWinner,leftEarly:p.leftEarly}});
      if (updated.count!==1) throw new Error("Missing participant");
+    }
+    // Lock profiles in stable order, including manual matches, to serialize concurrent
+    // career updates without lost increments or cross-match lock inversions.
+    if(result.endReason==='TIME_LIMIT') {
+     const rows=await tx.matchParticipant.findMany({where:{matchId:result.matchId},orderBy:{participantKey:'asc'}});
+     for(const p of rows) {
+      if(!p.playerProfileId)continue;
+      await tx.$queryRaw`SELECT id FROM "PlayerProfile" WHERE id = ${p.playerProfileId}::uuid FOR NO KEY UPDATE`;
+      const profile=await tx.playerProfile.findUniqueOrThrow({where:{id:p.playerProfileId},select:{rating:true}});
+      const old=await tx.playerStatistics.upsert({where:{playerProfileId:p.playerProfileId},create:{playerProfileId:p.playerProfileId,peakMmr:Math.max(1000,profile.rating)},update:{}});
+      const rated=match.roomType==='MATCHMAKING', won=outcome(p.isWinner,result.tied), streak=rated?(won==='W'?old.currentWinStreak+1:0):old.currentWinStreak;
+      await tx.playerStatistics.update({where:{playerProfileId:p.playerProfileId},data:{
+       totalMatches:{increment:1},ratedMatches:{increment:rated?1:0},unratedMatches:{increment:rated?0:1},
+       wins:{increment:won==='W'?1:0},losses:{increment:won==='L'?1:0},ties:{increment:won==='T'?1:0},eliminations:{increment:p.eliminations},deaths:{increment:p.deaths},
+       ratedWins:{increment:rated&&won==='W'?1:0},ratedLosses:{increment:rated&&won==='L'?1:0},ratedTies:{increment:rated&&won==='T'?1:0},ratedEliminations:{increment:rated?p.eliminations:0},ratedDeaths:{increment:rated?p.deaths:0},
+       ...(rated?{peakMmr:Math.max(old.peakMmr,profile.rating),currentWinStreak:streak,bestWinStreak:Math.max(old.bestWinStreak,streak)}:{})
+      }});
+     }
     }
    });
    return safeResult(await db.match.findUniqueOrThrow({where:{id:result.matchId},select:resultSelect}));

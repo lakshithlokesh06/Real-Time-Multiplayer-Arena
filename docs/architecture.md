@@ -264,3 +264,58 @@ Only TIME_LIMIT completions of matchmade 1v1 matches affect ratings. Manual matc
 The matchmaking card shows Find Match, Searching with preserved elapsed time and rating, Match Found with textual deadline and Accept/Decline, Waiting for opponent, and Preparing Arena. Manual controls remain available when idle. Controls are native keyboard-accessible buttons, state headings use polite announcements, and mobile cards remain within the viewport. Presentation timers use server timestamps plus monotonic elapsed browser time and never determine eligibility or acceptance.
 
 Results and history display the current participant's `before → after (delta)` only when a rating update exists. Manual records never imply MMR movement. Authentication, safe identity projection, room/match access control, session validation, newest-controller checks, and shared command limits (40 commands/10 seconds, eight pending operations) remain in effect. Rating reads occur on queue entry and match start; writes occur only in match finalization. No queue queries or rating writes were added to simulation ticks. Leaderboards, seasons, divisions, parties, teams, tournaments, spectators, bots, and deployment remain deferred to future phases; Phase 8 is not implemented.
+
+## Phase 8 — Career statistics and competitive rankings
+
+This section supersedes the Phase 7 deferral of divisions and leaderboards. The existing matchmaking, Elo, game simulation and match-history architecture remains in use.
+
+### Storage and migration boundary
+
+`PlayerStatistics` is a one-to-one relation keyed by `playerProfileId`, cascading on profile deletion. It stores total/rated/unrated completed match counts, overall wins/losses/ties and eliminations/deaths, explicit rated outcomes/combat, peak MMR, current/best rated win streak and `updatedAt`. Division, win rate, K/D and rank are derived, not independently stored. Registration creates User, Profile, Statistics and Session in the existing transaction. Finalization can safely initialize a missing statistics row for a profile created outside registration.
+
+Additive migration `20260912050000_player_statistics` creates the table and indexes and inserts zero counters for existing profiles. Initial peak is `max(1000, current rating)`; current ratings and all prior accounts, sessions and match records remain unchanged. Career counters begin with completions after this migration. Historical finished matches are deliberately not replayed into counters, and historical peaks cannot be reconstructed by this default initialization. Recent form still reads actual history, so pre-migration results may appear there while the player remains unranked until their first post-migration rated completion. There is no reset of the development database.
+
+### Completion, outcomes and concurrency
+
+The existing conditional `IN_GAME → FINISHED` update claims a match in a PostgreSQL transaction. Only the successful claimant writes participant results, Elo changes and statistics. Retries/concurrent calls that observe FINISHED return its persisted result without further counter updates. Errors anywhere—including a statistics write after an earlier participant was updated—roll back the claim, all participant changes, MMR and statistics. The existing lifecycle retry mechanism retries the same match identity.
+
+Only `TIME_LIMIT` results count as completed career matches. `EMPTY_ROOM` records remain in history but award no career totals, ranked outcomes, combat totals, MMR or streak changes. This avoids turning mutual abandonment into competitive progress. A participant who left early is counted normally if the match reaches TIME_LIMIT; deleted profiles retain historical snapshots but have no live statistics row to update.
+
+All TIME_LIMIT participants increment total matches and overall eliminations/deaths. A unique winner receives W and other participants L; tied top finishers receive T, with lower finishers L, matching the Phase 6 standings. Manual matches increment unrated and overall outcome counters only. Matchmaking increments rated counts, outcomes and combat and updates peak/streak. Manual results never change ranked counters, streak, MMR or division progress. Win increments current streak; loss or tie resets it to zero. Best streak and peak never decrease. Peak uses the profile rating after its transactional Elo update.
+
+Profile rows are locked in stable profile-ID order with `FOR NO KEY UPDATE`. This serializes concurrent career updates, including overlapping manual matches, while remaining compatible with foreign-key key-share locks acquired when writing a winner reference. Rating writes already use the same stable participant order. No career writes occur on kills, snapshots, reconnect, API reads or simulation ticks.
+
+### Divisions and metrics
+
+The pure server utility `services/competitive.ts` derives these exact divisions:
+
+| Division | MMR |
+| --- | --- |
+| Bronze | Below 900 |
+| Silver | 900–1099 |
+| Gold | 1100–1299 |
+| Platinum | 1300–1499 |
+| Diamond | 1500–1699 |
+| Master | 1700+ |
+
+Starting 1000 is Silver. Progress is the clamped fraction between the current and next thresholds; Bronze uses a presentation floor of zero, with negative MMR clamped to zero progress. The API includes current MMR, division, next division/threshold and MMR required. Master has null next fields and is labeled highest division. No promotion series, hidden rating or subtiers exist.
+
+Ranked win rate is `100 × ratedWins / ratedMatches`, including ties in the completed-outcome denominator, or zero with no matches. Ranked K/D is rated eliminations divided by rated deaths; with zero deaths it is the elimination count (including zero). UI rounds only presentation to one decimal for percentage and two for K/D; ranking uses the database numeric ratio, not rounded UI values. Streaks are processed in successful transaction order; normal rated lifecycle prevents a player overlapping rated matches.
+
+### APIs, eligibility and ordering
+
+Both `GET /api/leaderboard?page=1&limit=25` and `GET /api/statistics/me` require a valid authenticated session. Reads are limited to 120 requests per minute per IP across these two routes, with no-store responses. Pagination accepts integer page 1–100000 and limit 1–50, defaults 1/25; repeated, malformed or unknown query fields are rejected. Statistics accepts no query fields. There are no writable statistics endpoints, and existing strict profile/registration and socket validation rejects client-supplied competitive values.
+
+At least one counted rated completion is required for leaderboard eligibility. Ordering is current MMR descending, rated wins descending, exact numeric win-rate ratio descending, then UUID ascending. Ranks are unique ordinal positions, not shared competition ranks. An out-of-range page returns an empty players array with total/page metadata. The response contains bounded safe public player projections and the authenticated player's own rank, or null when unranked—even when that player is outside the requested page. Email, user ID, username, authentication/session metadata and ORM relations are not serialized.
+
+A bounded SQL page query joins profiles and statistics; a database count determines the own rank using exactly the same comparisons. A separate eligibility count supplies total pages. Repeatable-read transactions ensure each response's page, totals and personal rank share a snapshot. No full leaderboard is loaded into JavaScript, no per-player queries run, and clients request only on page entry, pagination or retry. This is on-demand SQL suitable for current scale: the database may still scan/sort eligible rows for exact ranking, and deep offset pages are more costly. It is not a cached or distributed rank service.
+
+Indexes cover profile `(rating, id)`, statistics `ratedMatches`, existing participant `(playerProfileId, matchId)` and a partial completed-rated match index `(endedAt DESC, id DESC)`. The latter is explicitly maintained by migration SQL because Prisma does not express this predicate in the model. PostgreSQL connection search_path now matches the validated Prisma adapter schema, ensuring raw rank/locking SQL honors isolated test schemas as well as public production tables.
+
+### Recent form and presentation
+
+Personal summary derives the latest five FINISHED MATCHMAKING TIME_LIMIT participants ordered by match completion descending then match ID descending. It projects only outcome, match ID and completion time. There is no form table or per-render full history query. W/L/T labels are newest first and independent of color.
+
+Dashboard shows a compact division/progress, peak, rank, rated record, win rate, K/D and latest rated form. Profile adds combat, streak and overall career totals. `/leaderboard` replaces the placeholder with responsive ranking cards, textual division labels, self highlighting, page controls and loading/error/retry/empty/unranked states. Navigation links to rankings. Match history labels rated matchmaking, unrated manual and abandonment while retaining existing results and MMR snapshots. Native progress elements and textual labels support accessibility; cards reorganize for narrow screens.
+
+Seasons, resets, placement matches, subtiers, parties, teams, tournaments, clans, achievements, spectators and bots remain deferred. Phase 9 is not started. Existing single-owner game operation and bounded persistence retries remain unchanged; no durable crash-recovery queue or production-scale leaderboard benchmark is claimed.

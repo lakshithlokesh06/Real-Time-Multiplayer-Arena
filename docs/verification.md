@@ -135,3 +135,47 @@ Matchmaking is single-process, capped at 200 entries, with one-second bounded ca
 Redis outages reject queue/room operations while in-memory gameplay can continue. Loss of a namespace holding live queue/game state requires application restart; reconnect/room cleanup may be unavailable meanwhile. New process namespaces prevent old proposals from creating duplicate rooms; old keys expire after 120 seconds. An automatic STARTING disconnect cancels the room rather than automatically requeueing the opponent. Global leaderboards, seasons, ranked divisions, parties, teams, bots, spectators, tournaments, and deployment remain deferred. Phase 8 was not started.
 
 Starting branch was clean `main` at `51d25bb`. Phase 7 preserved README.md exactly; its SHA-1 was and remains `45af7d2f355d2306da160aa3094a61b2514d480d`. README.md is not staged or included in this phase's commit. Only explicitly enumerated Phase 7 files are staged, excluding actual environment files, generated output, browser artifacts, and unrelated changes. The requested commit message is `Add automated matchmaking and MMR foundation`. Actual commit/push hashes and final synchronization are reported after the Git operations in the completion message; no force-push or automatic conflict resolution is used.
+
+## Phase 8 — Player statistics, ranked divisions and leaderboards
+
+Verification performed September 12, 2026. This section supersedes the Phase 7 statement that rankings/divisions are deferred.
+
+### Scope and files
+
+- Added `server/src/services/competitive.ts`, `statistics.ts` and `server/src/routes/competitive.ts` for derived divisions/metrics, bounded SQL rankings, personal summaries and authenticated read APIs.
+- Updated `server/src/services/matches.ts`, `auth.ts`, `server/src/app.ts`, `server/src/config/database.ts` for transactional counters, registration defaults, routing and raw-SQL schema isolation.
+- Added `PlayerStatistics` to `server/prisma/schema.prisma` and migration `server/prisma/migrations/20260912050000_player_statistics/migration.sql`.
+- Added `server/test/competitive.test.ts`, `statistics.test.ts`; extended `server/test/migration.test.ts` without removing baseline coverage.
+- Added `frontend/src/components/competitive-summary.tsx`, `ranked-leaderboard.tsx`, `frontend/src/types/competitive.ts`; updated leaderboard route, profile, dashboard, navigation, history and global styles.
+- Added `scripts/verify-statistics.mjs`; documentation changes are confined to this file and `docs/architecture.md`.
+
+### Automated tests and database checks
+
+Full `npm test` passes **233 tests: 221 backend + 12 shared**, preserving all 197 Phase 7 tests and adding 36. New coverage includes all division boundaries and progress, Master behavior, finite metrics, persisted registration defaults, rated winner/left-early loser outcomes and combat, repeat/concurrent finalization, successive wins, tie/loss streak resets, peak monotonicity, manual isolation, recent-five ordering, abandonment exclusion, transaction rollback and retry, concurrent manual counter updates, authenticated APIs, pagination validation, safe fields, off-page personal rank, eligibility and all ordering tie-breakers. An injected PostgreSQL trigger failure during statistics persistence verifies prior writes, rating changes and match claim roll back together before a successful retry.
+
+Each integration database is an isolated random schema in the dedicated `_test` database. All four migrations deploy fresh there. The populated upgrade fixture preserves users, profiles, sessions and historical participants through the additive migration, verifying zero/default statistics. Development migration deploy succeeded without reset; the pre-existing five tables were empty and remained byte-identical by sorted-record SHA-256 comparison. Four migrations are applied and `prisma migrate status` reports up to date. No existing migration was rewritten.
+
+The concurrent manual test initially found a PostgreSQL lock upgrade deadlock. Using `FOR NO KEY UPDATE` preserves serialization without conflicting with winner foreign-key checks; the regression now passes. Initial raw SQL also exposed the Prisma adapter's schema-versus-search_path distinction, now covered by every isolated-schema integration test.
+
+### Static verification and production builds
+
+Final results are recorded after the browser and review pass below. An initial sandboxed Turbopack attempt could not bind its worker port and cached that failure. A clean generated cache with approved process access restored the standard Turbopack production build successfully. A diagnostic webpack build also completed but warned about the existing Phaser default import; the delivered and browser-tested build uses the project's normal Turbopack path, with no bundler/package changes.
+
+### Policies and limits
+
+Counters start at this migration; existing finished results are preserved but not backfilled into career counters. Prior rated history may therefore appear in recent form before new counters establish leaderboard eligibility. Peak initializes to max(1000, current rating), not a reconstructed pre-migration historical maximum. EMPTY_ROOM results count toward neither career nor ranked totals. Rankings use exact database counts/sorts with bounded output; large-scale latency, deep-page performance and distributed ranking have not been benchmarked. Seasons, resets, placements, parties, teams, tournaments, clans, achievements, spectators and bots remain future work. Phase 9 is not started.
+
+### Final verified results
+
+- Backend/frontend lint: PASS (`npm run lint`).
+- Backend/frontend TypeScript: PASS (`npm run typecheck`).
+- Prisma validation: PASS; four migrations applied and status current.
+- Standard Next/Turbopack frontend production build: PASS. Server production TypeScript build: PASS.
+- Full backend/shared suite: **233 passing, zero failed/skipped/cancelled** (221 + 12).
+- Two-player production-browser scenario: PASS via `scripts/verify-statistics.mjs`, with 472/471 received snapshots and no page exceptions or significant console errors. New players started at 1000/Silver/unranked. First rated result produced 1016/984, correct win/loss, combat, rank and W/L form. Second rated tie produced 1015/985, T/W form for the winner, current streak zero, best streak one and unchanged peak 1016. The same players then completed an unrated manual match: total/unrated counts advanced while every inspected ranked field, MMR, rank and recent form remained identical.
+- Leaderboard, profile and dashboard passed viewport-overflow checks at widths 1280, 768 and 390. Self highlighting, rank text, recent form, rated/unrated history labels and production refresh/reconnect also passed. Mobile leaderboard/profile and tablet dashboard screenshots were visually inspected for readable cards and metrics. Pagination and error/auth behavior are covered by integration tests; no production-scale performance claim is made.
+- Browser screenshots were written outside the repository to the OS temporary `arena-browser-PROJCV` directory. The QA script removed only its two accounts and collected match IDs; generated statistics cascade with those profiles. The initial browser attempt stopped on an incorrect test expectation that navigating away preserved the finished automatic room; the corrected scenario passed end to end.
+
+### README and Git review
+
+README.md was not edited or staged by Phase 8. Its pre-sync Git blob remained `03f4bef06882843ae05368cf094262fb7da50f37`. Fetch found upstream commit `cf18898` changing only README.md; synchronization preserves that upstream file verbatim. Phase 8 stages an explicit file allowlist, excluding README, secrets/environment files, generated Prisma/Next output, logs and browser artifacts. The requested commit message is `Add player statistics rankings and leaderboards`; the actual final hash, push result and main/origin synchronization are reported after Git operations in the completion response. No force-push or automatic conflict resolution is used.
